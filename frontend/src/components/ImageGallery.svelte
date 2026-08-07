@@ -1,23 +1,72 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image as ImageIcon, Bot, Calendar, Radio, Compass, Eye, Sparkles } from '@lucide/svelte'
+  import { Image as ImageIcon, Bot, Sparkles, Trash2, AlertTriangle } from '@lucide/svelte'
 
   let { onRunAI = () => {} } = $props()
 
   let records = $state([])
   let selectedRecord = $state(null)
   let activeChannel = $state('full')
+  let currentImageBase64 = $state('')
 
   async function loadRecords() {
     if (window.go?.main?.App) {
       try {
         records = await window.go.main.App.GetPassRecords()
-        if (records.length > 0 && !selectedRecord) {
-          selectedRecord = records[0]
+        if (records.length > 0) {
+          if (!selectedRecord || !records.find(r => r.id === selectedRecord.id)) {
+            selectedRecord = records[0]
+          }
+        } else {
+          selectedRecord = null
         }
       } catch (err) {
         console.error("Failed to load pass records:", err)
+      }
+    }
+  }
+
+  async function updateImageSrc() {
+    if (!selectedRecord) {
+      currentImageBase64 = ''
+      return
+    }
+    const path = activeChannel === 'full' 
+      ? selectedRecord.image_path 
+      : (activeChannel === 'chanA' ? selectedRecord.channel_a : selectedRecord.channel_b)
+
+    if (window.go?.main?.App && path) {
+      try {
+        currentImageBase64 = await window.go.main.App.GetImageBase64(path)
+      } catch (err) {
+        console.error("Failed to load image base64:", err)
+        currentImageBase64 = ''
+      }
+    } else {
+      currentImageBase64 = ''
+    }
+  }
+
+  $effect(() => {
+    selectedRecord
+    activeChannel
+    updateImageSrc()
+  })
+
+  async function deleteRecord(rec, e) {
+    if (e) e.stopPropagation()
+    if (!confirm(i18n.t('gallery.deleteConfirm'))) return
+
+    if (window.go?.main?.App) {
+      try {
+        await window.go.main.App.DeletePassRecord(rec.id)
+        if (selectedRecord?.id === rec.id) {
+          selectedRecord = null
+        }
+        await loadRecords()
+      } catch (err) {
+        console.error("Failed to delete record:", err)
       }
     }
   }
@@ -61,9 +110,12 @@
 
         <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
           {#each records as rec}
-            <button
+            <div
+              role="button"
+              tabindex="0"
               onclick={() => selectedRecord = rec}
-              class="w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between {selectedRecord?.id === rec.id ? 'bg-cyan-950/40 border-cyan-500/50 text-slate-100' : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'}"
+              onkeydown={(e) => e.key === 'Enter' && (selectedRecord = rec)}
+              class="w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between group cursor-pointer {selectedRecord?.id === rec.id ? 'bg-cyan-950/40 border-cyan-500/50 text-slate-100' : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'}"
             >
               <div>
                 <span class="text-xs font-bold text-slate-200 block">{rec.sat_name}</span>
@@ -71,12 +123,22 @@
                 <span class="text-[10px] text-slate-500 block">{new Date(rec.timestamp).toLocaleString()}</span>
               </div>
 
-              {#if rec.ai_analysis}
-                <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30" title={i18n.t('gallery.aiReady')}>
-                  <Sparkles class="w-3.5 h-3.5" />
-                </span>
-              {/if}
-            </button>
+              <div class="flex items-center gap-1.5">
+                {#if rec.ai_analysis}
+                  <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30" title={i18n.t('gallery.aiReady')}>
+                    <Sparkles class="w-3.5 h-3.5" />
+                  </span>
+                {/if}
+
+                <button
+                  onclick={(e) => deleteRecord(rec, e)}
+                  class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all"
+                  title={i18n.t('gallery.delete')}
+                >
+                  <Trash2 class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           {/each}
         </div>
       </div>
@@ -92,34 +154,54 @@
               <p class="text-xs text-slate-400">{new Date(selectedRecord.timestamp).toLocaleString()} • {i18n.t('gallery.maxElevLabel')} {selectedRecord.max_elevation}°</p>
             </div>
 
-            <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <div class="flex items-center gap-3">
+              <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                <button
+                  onclick={() => activeChannel = 'full'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'full' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                >
+                  {i18n.t('gallery.viewFull')}
+                </button>
+                <button
+                  onclick={() => activeChannel = 'chanA'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanA' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                >
+                  {i18n.t('gallery.viewChanA')}
+                </button>
+                <button
+                  onclick={() => activeChannel = 'chanB'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanB' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                >
+                  {i18n.t('gallery.viewChanB')}
+                </button>
+              </div>
+
               <button
-                onclick={() => activeChannel = 'full'}
-                class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'full' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                onclick={(e) => deleteRecord(selectedRecord, e)}
+                class="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/30 text-xs font-medium flex items-center gap-1.5 transition-all"
+                title={i18n.t('gallery.delete')}
               >
-                {i18n.t('gallery.viewFull')}
-              </button>
-              <button
-                onclick={() => activeChannel = 'chanA'}
-                class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanA' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-              >
-                {i18n.t('gallery.viewChanA')}
-              </button>
-              <button
-                onclick={() => activeChannel = 'chanB'}
-                class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanB' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-              >
-                {i18n.t('gallery.viewChanB')}
+                <Trash2 class="w-3.5 h-3.5" />
+                {i18n.t('gallery.delete')}
               </button>
             </div>
           </div>
 
-          <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[360px] flex items-center justify-center p-2">
-            <img
-              src={activeChannel === 'full' ? selectedRecord.image_path : (activeChannel === 'chanA' ? selectedRecord.channel_a : selectedRecord.channel_b)}
-              alt="APT Satellite Capture"
-              class="max-h-[460px] object-contain rounded-lg shadow-xl"
-            />
+          <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[360px] flex items-center justify-center p-4">
+            {#if currentImageBase64}
+              <img
+                src={currentImageBase64}
+                alt="APT Satellite Capture"
+                class="max-h-[460px] object-contain rounded-lg shadow-xl"
+              />
+            {:else}
+              <div class="text-center py-12 px-6 space-y-3">
+                <AlertTriangle class="w-10 h-10 text-amber-500/80 mx-auto" />
+                <p class="text-xs text-slate-300 font-medium max-w-sm">
+                  {i18n.t('gallery.imageNotFound')}
+                </p>
+              </div>
+            {/if}
           </div>
 
           <div class="flex items-center justify-between pt-2">

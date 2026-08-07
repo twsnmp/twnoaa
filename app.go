@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -325,4 +327,37 @@ func (a *App) RunAIAnalysis(recordID string) string {
 	}()
 
 	return "AI analysis started in background"
+}
+
+func (a *App) GetImageBase64(imagePath string) string {
+	if imagePath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(imagePath)
+	if err != nil {
+		return ""
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+func (a *App) DeletePassRecord(recordID string) string {
+	records := a.store.GetRecords()
+	for _, r := range records {
+		if r.ID == recordID {
+			if r.ImagePath != "" {
+				_ = os.Remove(r.ImagePath)
+			}
+			if r.ChannelA != "" {
+				_ = os.Remove(r.ChannelA)
+			}
+			if r.ChannelB != "" {
+				_ = os.Remove(r.ChannelB)
+			}
+			break
+		}
+	}
+	if err := a.store.DeleteRecord(recordID); err != nil {
+		return fmt.Sprintf("Error deleting record: %v", err)
+	}
+	return "Record deleted successfully"
 }

@@ -76,7 +76,10 @@ const translations = {
       viewChanB: "Channel B (Infrared)",
       runAI: "Analyze with AI",
       aiReady: "AI Analysis Ready",
-      imageRes: "Image Resolution: 2080px line scan"
+      imageRes: "Image Resolution: 2080px line scan",
+      delete: "Delete Record",
+      deleteConfirm: "Are you sure you want to delete this pass record and its files?",
+      imageNotFound: "Image file not found or failed to decode."
     },
     ai: {
       title: "AI Meteorological Image Analysis",
@@ -198,7 +201,10 @@ const translations = {
       viewChanB: "チャンネルB (赤外線)",
       runAI: "AI気象解析を実行",
       aiReady: "AI解析完了",
-      imageRes: "解像度: 2080px ラインスキャン"
+      imageRes: "解像度: 2080px ラインスキャン",
+      delete: "レコード削除",
+      deleteConfirm: "この受信履歴と関連画像ファイルを削除しますか？",
+      imageNotFound: "画像ファイルが存在しないか、受信・復調に失敗したデータです。"
     },
     ai: {
       title: "AI気象解析システム (マルチLLM連携)",
