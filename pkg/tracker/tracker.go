@@ -26,7 +26,7 @@ var TargetSatellites = []SatelliteInfo{
 	{Name: "NOAA 19", NORADID: "33591", Frequency: 137100000, FreqMHz: 137.100},
 }
 
-// Built-in fallback TLEs for offline operation or Celestrak fetch timeout
+// Built-in fallback TLEs for instant offline operation
 var FallbackTLEs = map[string]string{
 	"25338_1": "1 25338U 98030A   24001.50000000  .00000100  00000-0  50000-4 0  9999",
 	"25338_2": "2 25338  98.7000 100.0000 0010000  90.0000 270.0000 14.12000000100003",
@@ -58,7 +58,7 @@ type PassDetail struct {
 	LOS       time.Time `json:"los"`
 	MaxElev   float64   `json:"max_elev"`
 	MaxElevAz float64   `json:"max_elev_az"`
-	Duration  float64   `json:"duration_sec"` // seconds
+	Duration  float64   `json:"duration_sec"`
 }
 
 type IPLocation struct {
@@ -78,13 +78,16 @@ func NewTracker() *Tracker {
 	for k, v := range FallbackTLEs {
 		tleCopy[k] = v
 	}
-	return &Tracker{
+	tr := &Tracker{
 		tleMap: tleCopy,
 	}
+	// Fetch live TLEs in background non-blocking
+	go tr.FetchTLEs()
+	return tr
 }
 
 func GetIPLocation() (*IPLocation, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Get("http://ip-api.com/json/")
 	if err != nil {
 		return nil, err
@@ -99,28 +102,20 @@ func GetIPLocation() (*IPLocation, error) {
 }
 
 func (t *Tracker) FetchTLEs() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if time.Since(t.lastTLEFetch) < 1*time.Hour && len(t.tleMap) > 0 && t.lastTLEFetch.IsZero() == false {
-		return nil
-	}
-
 	urls := []string{
 		"https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=TLE",
 		"https://celestrak.org/NORAD/elements/weather.txt",
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 3 * time.Second}
 	var body []byte
-	var fetchErr error
 
 	for _, u := range urls {
 		resp, err := client.Get(u)
 		if err == nil && resp.StatusCode == 200 {
-			body, fetchErr = io.ReadAll(resp.Body)
+			body, _ = io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if fetchErr == nil && len(body) > 0 {
+			if len(body) > 0 {
 				break
 			}
 		}
@@ -130,13 +125,7 @@ func (t *Tracker) FetchTLEs() error {
 	}
 
 	if len(body) == 0 {
-		// Use built-in fallbacks if network fetch fails
-		if len(t.tleMap) == 0 {
-			for k, v := range FallbackTLEs {
-				t.tleMap[k] = v
-			}
-		}
-		return fmt.Errorf("could not update live TLEs from Celestrak, using cached/fallback TLEs")
+		return fmt.Errorf("using offline fallback TLEs")
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
@@ -158,29 +147,20 @@ func (t *Tracker) FetchTLEs() error {
 		}
 	}
 
-	// Ensure all target satellites are present
-	for _, sat := range TargetSatellites {
-		if _, ok := newMap[sat.NORADID+"_1"]; !ok {
-			if f1, ok1 := FallbackTLEs[sat.NORADID+"_1"]; ok1 {
-				newMap[sat.NORADID+"_1"] = f1
-				newMap[sat.NORADID+"_2"] = FallbackTLEs[sat.NORADID+"_2"]
-			}
-		}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for k, v := range newMap {
+		t.tleMap[k] = v
 	}
-
-	if len(newMap) > 0 {
-		t.tleMap = newMap
-		t.lastTLEFetch = time.Now()
-	}
+	t.lastTLEFetch = time.Now()
 	return nil
 }
 
 func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*SatelliteState, error) {
-	_ = t.FetchTLEs()
-
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	obs := NewObserver(obsLat, obsLon, obsAlt)
 	now := time.Now().UTC()
 	states := make([]*SatelliteState, 0, len(TargetSatellites))
 
@@ -198,8 +178,8 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 		}
 
 		ecef := sat.propagateECEF(now)
-		look := calculateLookAngle(obsLat, obsLon, obsAlt, ecef)
-		doppler := calculateDopplerShift(satInfo.Frequency, sat, obsLat, obsLon, obsAlt, now)
+		look := obs.LookAngle(ecef)
+		doppler := calculateDopplerShift(satInfo.Frequency, sat, obs, now)
 		lat, lon, alt := ecefToGeodetic(ecef)
 
 		states = append(states, &SatelliteState{
@@ -221,15 +201,15 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 }
 
 func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) ([]*PassDetail, error) {
-	_ = t.FetchTLEs()
-
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	obs := NewObserver(obsLat, obsLon, obsAlt)
 	startTime := time.Now().UTC()
 	endTime := startTime.Add(time.Duration(hours) * time.Hour)
 
 	passes := make([]*PassDetail, 0)
+	step := 30 * time.Second
 
 	for _, satInfo := range TargetSatellites {
 		tle1, ok1 := t.tleMap[satInfo.NORADID+"_1"]
@@ -249,11 +229,10 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 		var maxEl float64
 		var maxElAz float64
 
-		for tm := startTime; tm.Before(endTime); tm = tm.Add(10 * time.Second) {
+		for tm := startTime; tm.Before(endTime); tm = tm.Add(step) {
 			ecef := sat.propagateECEF(tm)
-			look := calculateLookAngle(obsLat, obsLon, obsAlt, ecef)
+			look := obs.LookAngle(ecef)
 
-			// Horizon threshold for AOS/LOS (0.0°)
 			if look.Elevation >= 0.0 {
 				if !inPass {
 					inPass = true
@@ -268,7 +247,6 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 			} else {
 				if inPass {
 					inPass = false
-					// Filter passes reaching peak elevation >= 5.0°
 					if maxEl >= 5.0 {
 						passes = append(passes, &PassDetail{
 							SatName:   satInfo.Name,
@@ -285,7 +263,6 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 			}
 		}
 
-		// Handle ongoing pass at endTime boundary
 		if inPass && maxEl >= 5.0 {
 			passes = append(passes, &PassDetail{
 				SatName:   satInfo.Name,
@@ -300,7 +277,6 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 		}
 	}
 
-	// Sort passes by AOS ascending
 	sort.Slice(passes, func(i, j int) bool {
 		return passes[i].AOS.Before(passes[j].AOS)
 	})
@@ -308,16 +284,68 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 	return passes, nil
 }
 
-// SGP4 Core Engine
+// Optimized Observer and SGP4 Engine
+type Observer struct {
+	Lat, Lon, Alt    float64
+	SinLat, CosLat   float64
+	SinLon, CosLon   float64
+	ObsX, ObsY, ObsZ float64
+}
+
+func NewObserver(lat, lon, alt float64) *Observer {
+	radLat := lat * math.Pi / 180.0
+	radLon := lon * math.Pi / 180.0
+	sinLat, cosLat := math.Sincos(radLat)
+	sinLon, cosLon := math.Sincos(radLon)
+
+	a := 6378.137
+	f := 1.0 / 298.257223563
+	e2 := 2*f - f*f
+
+	N := a / math.Sqrt(1-e2*sinLat*sinLat)
+	obsX := (N + alt) * cosLat * cosLon
+	obsY := (N + alt) * cosLat * sinLon
+	obsZ := (N*(1-e2) + alt) * sinLat
+
+	return &Observer{
+		Lat: lat, Lon: lon, Alt: alt,
+		SinLat: sinLat, CosLat: cosLat,
+		SinLon: sinLon, CosLon: cosLon,
+		ObsX: obsX, ObsY: obsY, ObsZ: obsZ,
+	}
+}
+
+func (obs *Observer) LookAngle(sat Vector) LookAngle {
+	rx := sat.X - obs.ObsX
+	ry := sat.Y - obs.ObsY
+	rz := sat.Z - obs.ObsZ
+
+	topS := obs.SinLat*obs.CosLon*rx + obs.SinLat*obs.SinLon*ry - obs.CosLat*rz
+	topE := -obs.SinLon*rx + obs.CosLon*ry
+	topU := obs.CosLat*obs.CosLon*rx + obs.CosLat*obs.SinLon*ry + obs.SinLat*rz
+
+	r := math.Sqrt(topE*topE + topS*topS + topU*topU)
+	el := math.Asin(topU/r) * 180.0 / math.Pi
+	az := math.Atan2(topE, -topS) * 180.0 / math.Pi
+	if az < 0 {
+		az += 360.0
+	}
+
+	return LookAngle{Azimuth: az, Elevation: el}
+}
+
 type TLESatellite struct {
-	EpochYear  int
-	EpochDay   float64
-	Inclin     float64
-	RAAN       float64
-	Eccen      float64
-	ArgPer     float64
-	MeanAnom   float64
-	MeanMotion float64
+	EpochYear     int
+	EpochDay      float64
+	Inclin        float64
+	RAAN          float64
+	Eccen         float64
+	ArgPer        float64
+	MeanAnom      float64
+	MeanMotion    float64
+	SemiMajorAxis float64
+	Sqrt1Eccen2   float64
+	EpochTime     time.Time
 }
 
 func parseTLE(l1, l2 string) (*TLESatellite, error) {
@@ -342,15 +370,22 @@ func parseTLE(l1, l2 string) (*TLESatellite, error) {
 	mm, _ := strconv.ParseFloat(strings.TrimSpace(l2[52:63]), 64)
 
 	deg2rad := math.Pi / 180.0
+	mmRadMin := mm * 2.0 * math.Pi / 1440.0
+	a := math.Pow(398600.4418/(mmRadMin*mmRadMin/3600.0), 1.0/3.0)
+	epochTime := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration((day - 1) * 24 * float64(time.Hour)))
+
 	return &TLESatellite{
-		EpochYear:  year,
-		EpochDay:   day,
-		Inclin:     inc * deg2rad,
-		RAAN:       raan * deg2rad,
-		Eccen:      ecc,
-		ArgPer:     argp * deg2rad,
-		MeanAnom:   ma * deg2rad,
-		MeanMotion: mm * 2.0 * math.Pi / 1440.0,
+		EpochYear:     year,
+		EpochDay:      day,
+		Inclin:        inc * deg2rad,
+		RAAN:          raan * deg2rad,
+		Eccen:         ecc,
+		ArgPer:        argp * deg2rad,
+		MeanAnom:      ma * deg2rad,
+		MeanMotion:    mmRadMin,
+		SemiMajorAxis: a,
+		Sqrt1Eccen2:   math.Sqrt(1.0 - ecc*ecc),
+		EpochTime:     epochTime,
 	}, nil
 }
 
@@ -358,8 +393,7 @@ type Vector struct{ X, Y, Z float64 }
 type LookAngle struct{ Azimuth, Elevation float64 }
 
 func (s *TLESatellite) propagateECEF(t time.Time) Vector {
-	epochTime := time.Date(s.EpochYear, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration((s.EpochDay - 1) * 24 * float64(time.Hour)))
-	dtMinutes := t.Sub(epochTime).Minutes()
+	dtMinutes := t.Sub(s.EpochTime).Minutes()
 
 	M := math.Mod(s.MeanAnom+s.MeanMotion*dtMinutes, 2*math.Pi)
 	if M < 0 {
@@ -367,93 +401,56 @@ func (s *TLESatellite) propagateECEF(t time.Time) Vector {
 	}
 
 	E := M
-	for i := 0; i < 10; i++ {
-		E = E - (E-s.Eccen*math.Sin(E)-M)/(1.0-s.Eccen*math.Cos(E))
+	for i := 0; i < 8; i++ {
+		sinE, cosE := math.Sincos(E)
+		E = E - (E-s.Eccen*sinE-M)/(1.0-s.Eccen*cosE)
 	}
 
-	a := math.Pow(398600.4418/(s.MeanMotion*s.MeanMotion/3600.0), 1.0/3.0)
-	xOrb := a * (math.Cos(E) - s.Eccen)
-	yOrb := a * math.Sqrt(1.0-s.Eccen*s.Eccen) * math.Sin(E)
+	sinE, cosE := math.Sincos(E)
+	xOrb := s.SemiMajorAxis * (cosE - s.Eccen)
+	yOrb := s.SemiMajorAxis * s.Sqrt1Eccen2 * sinE
 
 	u := math.Atan2(yOrb, xOrb) + s.ArgPer
 	r := math.Sqrt(xOrb*xOrb + yOrb*yOrb)
 
-	xECI := r * (math.Cos(s.RAAN)*math.Cos(u) - math.Sin(s.RAAN)*math.Sin(u)*math.Cos(s.Inclin))
-	yECI := r * (math.Sin(s.RAAN)*math.Cos(u) + math.Cos(s.RAAN)*math.Sin(u)*math.Cos(s.Inclin))
-	zECI := r * (math.Sin(u) * math.Sin(s.Inclin))
+	sinRaan, cosRaan := math.Sincos(s.RAAN)
+	sinInc, cosInc := math.Sincos(s.Inclin)
+	sinU, cosU := math.Sincos(u)
+
+	xECI := r * (cosRaan*cosU - sinRaan*sinU*cosInc)
+	yECI := r * (sinRaan*cosU + cosRaan*sinU*cosInc)
+	zECI := r * (sinU * sinInc)
 
 	julianDay := float64(t.Unix())/86400.0 + 2440587.5
 	d := julianDay - 2451545.0
 	gst := math.Mod(280.46061837+360.98564736629*d, 360.0) * math.Pi / 180.0
+	sinGst, cosGst := math.Sincos(gst)
 
-	xECEF := xECI*math.Cos(gst) + yECI*math.Sin(gst)
-	yECEF := -xECI*math.Sin(gst) + yECI*math.Cos(gst)
+	xECEF := xECI*cosGst + yECI*sinGst
+	yECEF := -xECI*sinGst + yECI*cosGst
 	zECEF := zECI
 
 	return Vector{X: xECEF, Y: yECEF, Z: zECEF}
 }
 
-func calculateLookAngle(lat, lon, alt float64, sat Vector) LookAngle {
-	radLat := lat * math.Pi / 180.0
-	radLon := lon * math.Pi / 180.0
-
-	a := 6378.137
-	f := 1.0 / 298.257223563
-	e2 := 2*f - f*f
-
-	N := a / math.Sqrt(1-e2*math.Sin(radLat)*math.Sin(radLat))
-	obsX := (N + alt) * math.Cos(radLat) * math.Cos(radLon)
-	obsY := (N + alt) * math.Cos(radLat) * math.Sin(radLon)
-	obsZ := (N*(1-e2) + alt) * math.Sin(radLat)
-
-	rx := sat.X - obsX
-	ry := sat.Y - obsY
-	rz := sat.Z - obsZ
-
-	topS := math.Sin(radLat)*math.Cos(radLon)*rx + math.Sin(radLat)*math.Sin(radLon)*ry - math.Cos(radLat)*rz
-	topE := -math.Sin(radLon)*rx + math.Cos(radLon)*ry
-	topU := math.Cos(radLat)*math.Cos(radLon)*rx + math.Cos(radLat)*math.Sin(radLon)*ry + math.Sin(radLat)*rz
-
-	r := math.Sqrt(topE*topE + topS*topS + topU*topU)
-	el := math.Asin(topU/r) * 180.0 / math.Pi
-	az := math.Atan2(topE, -topS) * 180.0 / math.Pi
-	if az < 0 {
-		az += 360.0
-	}
-
-	return LookAngle{Azimuth: az, Elevation: el}
-}
-
-func calculateDopplerShift(freq int, sat *TLESatellite, lat, lon, alt float64, t time.Time) float64 {
-	dt := 1.0 // sec
+func calculateDopplerShift(freq int, sat *TLESatellite, obs *Observer, t time.Time) float64 {
+	dt := 1.0
 	pos1 := sat.propagateECEF(t)
 	pos2 := sat.propagateECEF(t.Add(time.Duration(dt) * time.Second))
 
-	r1 := rangeDistance(lat, lon, alt, pos1)
-	r2 := rangeDistance(lat, lon, alt, pos2)
-	vRad := (r2 - r1) / dt // km/s
+	r1 := rangeDistanceObs(obs, pos1)
+	r2 := rangeDistanceObs(obs, pos2)
+	vRad := (r2 - r1) / dt
 
-	c := 299792.458 // km/s
+	c := 299792.458
 	dopplerHz := -float64(freq) * (vRad / c)
 	return dopplerHz
 }
 
-func rangeDistance(lat, lon, alt float64, sat Vector) float64 {
-	radLat := lat * math.Pi / 180.0
-	radLon := lon * math.Pi / 180.0
-
-	a := 6378.137
-	f := 1.0 / 298.257223563
-	e2 := 2*f - f*f
-
-	N := a / math.Sqrt(1-e2*math.Sin(radLat)*math.Sin(radLat))
-	obsX := (N + alt) * math.Cos(radLat) * math.Cos(radLon)
-	obsY := (N + alt) * math.Cos(radLat) * math.Sin(radLon)
-	obsZ := (N*(1-e2) + alt) * math.Sin(radLat)
-
-	dx := sat.X - obsX
-	dy := sat.Y - obsY
-	dz := sat.Z - obsZ
+func rangeDistanceObs(obs *Observer, sat Vector) float64 {
+	dx := sat.X - obs.ObsX
+	dy := sat.Y - obs.ObsY
+	dz := sat.Z - obs.ObsZ
 	return math.Sqrt(dx*dx + dy*dy + dz*dz)
 }
 
@@ -467,7 +464,7 @@ func ecefToGeodetic(v Vector) (lat, lon, alt float64) {
 	p := math.Sqrt(v.X*v.X + v.Y*v.Y)
 	lat = math.Atan2(v.Z, p*(1-e2)) * 180.0 / math.Pi
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 4; i++ {
 		radLat := lat * math.Pi / 180.0
 		N := a / math.Sqrt(1-e2*math.Sin(radLat)*math.Sin(radLat))
 		alt = p/math.Cos(radLat) - N

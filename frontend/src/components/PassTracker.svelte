@@ -23,8 +23,16 @@
 
   async function refreshTLEs() {
     isLoading = true
-    await loadData()
-    isLoading = false
+    try {
+      if (window.go?.main?.App) {
+        await window.go.main.App.RefreshTLEs()
+      }
+      await loadData()
+    } catch (err) {
+      console.error("Failed to refresh TLEs:", err)
+    } finally {
+      isLoading = false
+    }
   }
 
   function formatTime(isoStr) {
@@ -35,7 +43,16 @@
 
   onMount(() => {
     loadData()
-    timer = setInterval(loadData, 3000)
+    // Poll satellite states every 3 seconds for live tracking
+    timer = setInterval(async () => {
+      if (window.go?.main?.App) {
+        try {
+          satStates = await window.go.main.App.GetSatelliteStates()
+        } catch (err) {
+          console.error("Failed to update satellite states:", err)
+        }
+      }
+    }, 3000)
   })
 
   onDestroy(() => {

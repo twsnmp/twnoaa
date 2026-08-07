@@ -78,10 +78,18 @@ func (a *App) GetSatelliteStates() ([]*tracker.SatelliteState, error) {
 
 func (a *App) GetUpcomingPasses(hours int) ([]*tracker.PassDetail, error) {
 	if hours <= 0 {
-		hours = 12
+		hours = 24
 	}
 	cfg := a.store.GetConfig()
 	return a.tracker.GetUpcomingPasses(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt, hours)
+}
+
+func (a *App) RefreshTLEs() string {
+	err := a.tracker.FetchTLEs()
+	if err != nil {
+		return fmt.Sprintf("TLE refresh note: %v", err)
+	}
+	return "TLE updated successfully"
 }
 
 // SDR Receiver API

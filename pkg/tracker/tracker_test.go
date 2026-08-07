@@ -23,7 +23,8 @@ func TestParseTLE(t *testing.T) {
 		t.Errorf("Propagated position is zero vector")
 	}
 
-	look := calculateLookAngle(36.028, 139.533, 0.02, ecef)
+	obs := NewObserver(36.028, 139.533, 0.02)
+	look := obs.LookAngle(ecef)
 	if look.Azimuth < 0 || look.Azimuth > 360 {
 		t.Errorf("Azimuth out of bounds: %f", look.Azimuth)
 	}
@@ -39,18 +40,16 @@ func TestTargetSatellitesList(t *testing.T) {
 }
 
 func TestFetchAndCalculateUpcomingPasses(t *testing.T) {
+	start := time.Now()
 	tr := NewTracker()
-	err := tr.FetchTLEs()
-	if err != nil {
-		t.Logf("FetchTLEs error (may be offline): %v", err)
-	}
 
 	passes, err := tr.GetUpcomingPasses(36.028, 139.533, 0.02, 24)
 	if err != nil {
 		t.Fatalf("GetUpcomingPasses returned error: %v", err)
 	}
 
-	t.Logf("Found %d upcoming passes in next 24 hours", len(passes))
+	elapsed := time.Since(start)
+	t.Logf("Calculated %d passes in %v", len(passes), elapsed)
 	for i, p := range passes {
 		t.Logf("Pass #%d: %s | AOS: %s | LOS: %s | MaxElev: %.1f°",
 			i+1, p.SatName, p.AOS.Format("15:04:05"), p.LOS.Format("15:04:05"), p.MaxElev)
