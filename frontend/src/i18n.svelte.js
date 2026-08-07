@@ -188,11 +188,11 @@ const translations = {
       noHardware: "SDRハードウェア非検出 (シミュレーションモード)"
     },
     gallery: {
-      title: "解密済み APT 衛星画像ギャラリー",
-      subtitle: "解密済み APT 衛星画像 ＆ 受信履歴",
-      empty: "まだ解密画像がありません。SDR受信タブで衛星パスを録音・デコードしてください。",
-      noImages: "解密されたAPT画像はまだありません",
-      decodedPasses: "解密済みパス",
+      title: "デコード済み APT 衛星画像ギャラリー",
+      subtitle: "デコード済み APT 衛星画像 ＆ 受信履歴",
+      empty: "まだデコードされた画像がありません。SDR受信タブで衛星パスを録音・デコードしてください。",
+      noImages: "デコードされたAPT画像はまだありません",
+      decodedPasses: "デコード済みパス",
       sat: "衛星名",
       date: "受信日時",
       maxElev: "最大仰角",
