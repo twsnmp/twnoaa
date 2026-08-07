@@ -164,7 +164,7 @@ const translations = {
       recording: "信号録音・復調デコード中...",
       hwActive: "ダイレクト librtlsdr ハードウェア制御 アクティブ",
       simActive: "ソフトウェア IQ シミュレーションエンジン アクティブ",
-      forceSim: "シミュレーションモード強制作用",
+      forceSim: "シミュレーションモード強制",
       tuningTitle: "チューニング ＆ 復調器",
       presets: "NOAA 衛星プリセット",
       band137: "137 MHz 帯",
