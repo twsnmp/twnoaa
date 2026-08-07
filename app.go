@@ -54,6 +54,9 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.sdrService.StopStream()
+	if a.store != nil {
+		_ = a.store.Close()
+	}
 }
 
 func (a *App) startAutoRecordScheduler() {
