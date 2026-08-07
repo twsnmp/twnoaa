@@ -25,11 +25,13 @@ type Config struct {
 	AutoAnalyze     bool   `json:"auto_analyze"`
 
 	// SDR Receiver settings
-	CenterFreq     int  `json:"center_freq"`
-	SampleRate     int  `json:"sample_rate"`
-	TunerGain      int  `json:"tuner_gain"`
-	TunerGainAuto  bool `json:"tuner_gain_auto"`
-	SimulationMode bool `json:"simulation_mode"`
+	CenterFreq         int  `json:"center_freq"`
+	SampleRate         int  `json:"sample_rate"`
+	TunerGain          int  `json:"tuner_gain"`
+	TunerGainAuto      bool `json:"tuner_gain_auto"`
+	SimulationMode     bool `json:"simulation_mode"`
+	AutoRecord         bool `json:"auto_record"`
+	AutoRecordDuration int  `json:"auto_record_duration"`
 
 	// Data storage
 	DataDir string `json:"data_dir"`
@@ -86,9 +88,11 @@ func NewStore() (*Store, error) {
 			CenterFreq:     137100000,
 			SampleRate:     2080000,
 			TunerGain:      400,
-			TunerGainAuto:  false,
-			SimulationMode: true, // Default to simulation if no hardware connected
-			DataDir:        baseDir,
+			TunerGainAuto:      false,
+			SimulationMode:     true, // Default to simulation if no hardware connected
+			AutoRecord:         false, // Default OFF as requested
+			AutoRecordDuration: 30,
+			DataDir:            baseDir,
 		},
 		records: make([]*PassRecord, 0),
 	}

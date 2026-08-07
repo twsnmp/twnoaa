@@ -16,6 +16,8 @@
     ollama_model: 'llama3',
     auto_analyze: true,
     simulation_mode: false,
+    auto_record: false,
+    auto_record_duration: 30,
     tuner_gain: 400,
     sample_rate: 2080000
   })
@@ -177,6 +179,34 @@
           <span class="text-[10px] text-slate-500 block">{i18n.t('settings.simDesc')}</span>
         </div>
       </label>
+
+      <label for="auto-record-checkbox" class="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
+        <input
+          id="auto-record-checkbox"
+          type="checkbox"
+          bind:checked={cfg.auto_record}
+          class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-cyan-500"
+        />
+        <div>
+          <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.autoRecord')}</span>
+          <span class="text-[10px] text-slate-500 block">{i18n.t('settings.autoRecordDesc')}</span>
+        </div>
+      </label>
+
+      {#if cfg.auto_record}
+        <div>
+          <label for="auto-record-duration" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.autoRecordDuration')}</label>
+          <input
+            id="auto-record-duration"
+            type="number"
+            bind:value={cfg.auto_record_duration}
+            min="10"
+            max="600"
+            step="5"
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+      {/if}
 
       <div>
         <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.defaultGain')}</label>

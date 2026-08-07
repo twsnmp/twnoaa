@@ -8,6 +8,8 @@
   let satStates = $state([])
   let upcomingPasses = $state([])
   let isLoading = $state(false)
+  let autoRecordEnabled = $state(false)
+  let autoRecordBanner = $state('')
   let timer
 
   async function loadData() {
@@ -15,6 +17,8 @@
       try {
         satStates = await window.go.main.App.GetSatelliteStates()
         upcomingPasses = await window.go.main.App.GetUpcomingPasses(24)
+        const cfg = await window.go.main.App.GetConfig()
+        if (cfg) autoRecordEnabled = cfg.auto_record
       } catch (err) {
         console.error("Failed to load satellite states:", err)
       }
@@ -53,6 +57,12 @@
         }
       }
     }, 3000)
+
+    if (window.runtime?.EventsOn) {
+      window.runtime.EventsOn('auto_record_started', (data) => {
+        autoRecordBanner = `衛星通過検出: ${data.sat_name} の自動録音・デコード (${data.duration}秒) を開始しました`
+      })
+    }
   })
 
   onDestroy(() => {
@@ -66,6 +76,12 @@
       <h2 class="text-xl font-bold text-slate-100 flex items-center gap-2">
         <Satellite class="w-5 h-5 text-cyan-400" />
         {i18n.t('tracker.liveStatus')}
+        {#if autoRecordEnabled}
+          <span class="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 ml-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+            {i18n.t('tracker.autoRecordActive')}
+          </span>
+        {/if}
       </h2>
       <p class="text-xs text-slate-400 mt-0.5">NOAA 15 (137.620 MHz) • NOAA 18 (137.9125 MHz) • NOAA 19 (137.100 MHz)</p>
     </div>
@@ -79,6 +95,13 @@
       {i18n.t('tracker.refresh')}
     </button>
   </div>
+
+  {#if autoRecordBanner}
+    <div class="p-3 bg-emerald-950/40 border border-emerald-800/40 rounded-xl text-xs text-emerald-300 font-medium flex items-center gap-2 flex-shrink-0 animate-pulse">
+      <Radio class="w-4 h-4 text-emerald-400" />
+      {autoRecordBanner}
+    </div>
+  {/if}
 
   <!-- Realtime Satellite Cards -->
   <div class="grid grid-cols-1 md:grid-cols-3 gap-3 flex-shrink-0">

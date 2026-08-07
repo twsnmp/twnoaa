@@ -18,12 +18,14 @@ import (
 )
 
 type App struct {
-	ctx        context.Context
-	store      *datastore.Store
-	tracker    *tracker.Tracker
-	sdrService *sdr.SDR
-	recording  bool
-	recMu      sync.Mutex
+	ctx            context.Context
+	store          *datastore.Store
+	tracker        *tracker.Tracker
+	sdrService     *sdr.SDR
+	recording      bool
+	recMu          sync.Mutex
+	recordedPasses map[string]time.Time
+	recPassMu      sync.Mutex
 }
 
 func NewApp() *App {
@@ -32,9 +34,10 @@ func NewApp() *App {
 	sd := sdr.NewSDR()
 
 	return &App{
-		store:      st,
-		tracker:    tr,
-		sdrService: sd,
+		store:          st,
+		tracker:        tr,
+		sdrService:     sd,
+		recordedPasses: make(map[string]time.Time),
 	}
 }
 
@@ -44,10 +47,73 @@ func (a *App) startup(ctx context.Context) {
 	go func() {
 		_ = a.tracker.FetchTLEs()
 	}()
+
+	// Start Auto-recording scheduler loop
+	go a.startAutoRecordScheduler()
 }
 
 func (a *App) shutdown(ctx context.Context) {
 	a.sdrService.StopStream()
+}
+
+func (a *App) startAutoRecordScheduler() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			cfg := a.store.GetConfig()
+			if !cfg.AutoRecord {
+				continue
+			}
+
+			a.recMu.Lock()
+			isRec := a.recording
+			a.recMu.Unlock()
+
+			if isRec {
+				continue
+			}
+
+			states, err := a.tracker.GetCurrentStates(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt)
+			if err != nil {
+				continue
+			}
+
+			now := time.Now()
+			for _, sat := range states {
+				if sat.IsActive { // Elevation >= 5.0°
+					passKey := fmt.Sprintf("%s_%s", sat.Name, now.Format("20060102_15"))
+
+					a.recPassMu.Lock()
+					_, alreadyRecorded := a.recordedPasses[passKey]
+					if !alreadyRecorded {
+						a.recordedPasses[passKey] = now
+					}
+					a.recPassMu.Unlock()
+
+					if !alreadyRecorded {
+						duration := cfg.AutoRecordDuration
+						if duration <= 0 {
+							duration = 30
+						}
+						if a.ctx != nil {
+							runtime.EventsEmit(a.ctx, "auto_record_started", map[string]interface{}{
+								"sat_name":  sat.Name,
+								"frequency": sat.Frequency,
+								"duration":  duration,
+							})
+						}
+						a.StartRecordingAndDecode(sat.Name, sat.Frequency, duration)
+						break
+					}
+				}
+			}
+		}
+	}
 }
 
 // Config API

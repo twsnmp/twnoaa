@@ -32,7 +32,9 @@ const translations = {
       tuneNow: "Tune & Receive Now",
       action: "Action",
       tune: "Tune Receiver",
-      noPasses: "No upcoming satellite passes detected in the next 24 hours."
+      noPasses: "No upcoming satellite passes detected in the next 24 hours.",
+      autoRecordActive: "Auto Pass Scheduler Active",
+      autoRecordOff: "Auto Pass Scheduler Off"
     },
     sdr: {
       title: "SDR Signal Receiver & DSP Demodulator",
@@ -105,6 +107,9 @@ const translations = {
       simMode: "Force Simulation Mode",
       simDesc: "Synthesize IQ signal offline for testing without RTL-SDR hardware.",
       defaultGain: "Default Tuner Gain (dB * 10)",
+      autoRecord: "Auto-record Satellite Passes",
+      autoRecordDesc: "Automatically tune, record, and decode satellite passes when elevation reaches 5° or higher.",
+      autoRecordDuration: "Auto Record Duration (seconds)",
       llmConfig: "LLM Provider Settings",
       activeProvider: "Active AI Provider",
       autoAnalyzeDesc: "Trigger AI meteorological analysis automatically when a pass finishes decoding.",
@@ -149,7 +154,9 @@ const translations = {
       tuneNow: "チューニング＆受信",
       action: "操作",
       tune: "チューニング",
-      noPasses: "直近24時間に通過する気象衛星はありません。"
+      noPasses: "直近24時間に通過する気象衛星はありません。",
+      autoRecordActive: "自動録音スケジューラー稼働中",
+      autoRecordOff: "自動録音スケジューラーOFF"
     },
     sdr: {
       title: "SDR受信機 & リアルタイムDSP復調器",
@@ -222,6 +229,9 @@ const translations = {
       simMode: "シミュレーションモードを強制使用",
       simDesc: "RTL-SDR ハードウェアがない環境でテスト用 IQ 信号を疑似生成します。",
       defaultGain: "デフォルトチューナーゲイン (dB * 10)",
+      autoRecord: "衛星通過時の自動録音・デコード",
+      autoRecordDesc: "衛星が地上局上空を通過する時刻（仰角5°以上）になると、自動的にSDR受信・録音・画像デコードを実行します。",
+      autoRecordDuration: "自動録音時間 (秒)",
       llmConfig: "LLMプロバイダー設定",
       activeProvider: "アクティブ AI プロバイダー",
       autoAnalyzeDesc: "衛星パスのデコード完了時に自動で AI 気象解析を実行します。",
