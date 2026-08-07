@@ -209,6 +209,7 @@
             <option value="ollama">Ollama (Local LLM)</option>
             <option value="gemini">Google Gemini</option>
             <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+            <option value="anthropic">Anthropic Claude</option>
           </select>
         </div>
 
@@ -269,6 +270,17 @@
               type="password"
               bind:value={cfg.api_key_openai}
               placeholder="sk-..."
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        {:else if cfg.active_provider === 'anthropic'}
+          <div class="md:col-span-2">
+            <label for="anthropic-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.anthropicKey')}</label>
+            <input
+              id="anthropic-key-input"
+              type="password"
+              bind:value={cfg.api_key_anthropic}
+              placeholder="sk-ant-..."
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
             />
           </div>

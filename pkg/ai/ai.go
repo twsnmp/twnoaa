@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/googleai"
 	"github.com/tmc/langchaingo/llms/ollama"
 	"github.com/tmc/langchaingo/llms/openai"
+
 
 	"twnoaa/pkg/datastore"
 )
@@ -70,6 +72,13 @@ func AnalyzeSatelliteImage(ctx context.Context, cfg datastore.Config, req Analys
 		model, err = googleai.New(
 			ctx,
 			googleai.WithAPIKey(cfg.APIKeyGemini),
+		)
+	case "anthropic":
+		if cfg.APIKeyAnthropic == "" {
+			return "", fmt.Errorf("Anthropic API key is missing in settings")
+		}
+		model, err = anthropic.New(
+			anthropic.WithToken(cfg.APIKeyAnthropic),
 		)
 	default:
 		return "", fmt.Errorf("unsupported AI provider: %s", cfg.ActiveProvider)
