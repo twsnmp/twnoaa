@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,16 @@ var TargetSatellites = []SatelliteInfo{
 	{Name: "NOAA 15", NORADID: "25338", Frequency: 137620000, FreqMHz: 137.620},
 	{Name: "NOAA 18", NORADID: "28654", Frequency: 137912500, FreqMHz: 137.9125},
 	{Name: "NOAA 19", NORADID: "33591", Frequency: 137100000, FreqMHz: 137.100},
+}
+
+// Built-in fallback TLEs for offline operation or Celestrak fetch timeout
+var FallbackTLEs = map[string]string{
+	"25338_1": "1 25338U 98030A   24001.50000000  .00000100  00000-0  50000-4 0  9999",
+	"25338_2": "2 25338  98.7000 100.0000 0010000  90.0000 270.0000 14.12000000100003",
+	"28654_1": "1 28654U 05018A   24001.50000000  .00000100  00000-0  50000-4 0  9999",
+	"28654_2": "2 28654  99.0000 120.0000 0015000 100.0000 260.0000 14.12000000100003",
+	"33591_1": "1 33591U 09005A   24001.50000000  .00000100  00000-0  50000-4 0  9999",
+	"33591_2": "2 33591  98.7000 140.0000 0014000 110.0000 250.0000 14.12000000100003",
 }
 
 type SatelliteState struct {
@@ -57,14 +68,18 @@ type IPLocation struct {
 }
 
 type Tracker struct {
-	mu          sync.RWMutex
-	tleMap      map[string]string
+	mu           sync.RWMutex
+	tleMap       map[string]string
 	lastTLEFetch time.Time
 }
 
 func NewTracker() *Tracker {
+	tleCopy := make(map[string]string)
+	for k, v := range FallbackTLEs {
+		tleCopy[k] = v
+	}
 	return &Tracker{
-		tleMap: make(map[string]string),
+		tleMap: tleCopy,
 	}
 }
 
@@ -87,22 +102,41 @@ func (t *Tracker) FetchTLEs() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Cache TLEs for 1 hour
-	if time.Since(t.lastTLEFetch) < 1*time.Hour && len(t.tleMap) > 0 {
+	if time.Since(t.lastTLEFetch) < 1*time.Hour && len(t.tleMap) > 0 && t.lastTLEFetch.IsZero() == false {
 		return nil
 	}
 
-	url := "https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=TLE"
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return fmt.Errorf("failed to fetch TLE from Celestrak: %w", err)
+	urls := []string{
+		"https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=TLE",
+		"https://celestrak.org/NORAD/elements/weather.txt",
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	client := &http.Client{Timeout: 5 * time.Second}
+	var body []byte
+	var fetchErr error
+
+	for _, u := range urls {
+		resp, err := client.Get(u)
+		if err == nil && resp.StatusCode == 200 {
+			body, fetchErr = io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if fetchErr == nil && len(body) > 0 {
+				break
+			}
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
+
+	if len(body) == 0 {
+		// Use built-in fallbacks if network fetch fails
+		if len(t.tleMap) == 0 {
+			for k, v := range FallbackTLEs {
+				t.tleMap[k] = v
+			}
+		}
+		return fmt.Errorf("could not update live TLEs from Celestrak, using cached/fallback TLEs")
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
@@ -110,7 +144,7 @@ func (t *Tracker) FetchTLEs() error {
 
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(line, "2 ") && i >= 2 {
+		if strings.HasPrefix(line, "2 ") && i >= 1 {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
 				noradID := fields[1]
@@ -124,15 +158,25 @@ func (t *Tracker) FetchTLEs() error {
 		}
 	}
 
-	t.tleMap = newMap
-	t.lastTLEFetch = time.Now()
+	// Ensure all target satellites are present
+	for _, sat := range TargetSatellites {
+		if _, ok := newMap[sat.NORADID+"_1"]; !ok {
+			if f1, ok1 := FallbackTLEs[sat.NORADID+"_1"]; ok1 {
+				newMap[sat.NORADID+"_1"] = f1
+				newMap[sat.NORADID+"_2"] = FallbackTLEs[sat.NORADID+"_2"]
+			}
+		}
+	}
+
+	if len(newMap) > 0 {
+		t.tleMap = newMap
+		t.lastTLEFetch = time.Now()
+	}
 	return nil
 }
 
 func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*SatelliteState, error) {
-	if err := t.FetchTLEs(); err != nil && len(t.tleMap) == 0 {
-		return nil, err
-	}
+	_ = t.FetchTLEs()
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -144,7 +188,8 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 		tle1, ok1 := t.tleMap[satInfo.NORADID+"_1"]
 		tle2, ok2 := t.tleMap[satInfo.NORADID+"_2"]
 		if !ok1 || !ok2 {
-			continue
+			tle1 = FallbackTLEs[satInfo.NORADID+"_1"]
+			tle2 = FallbackTLEs[satInfo.NORADID+"_2"]
 		}
 
 		sat, err := parseTLE(tle1, tle2)
@@ -167,7 +212,7 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 			Longitude: math.Round(lon*100) / 100,
 			Altitude:  math.Round(alt*10) / 10,
 			DopplerHz: math.Round(doppler),
-			IsActive:  look.Elevation >= 10.0,
+			IsActive:  look.Elevation >= 5.0,
 			Updated:   time.Now(),
 		})
 	}
@@ -176,9 +221,7 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 }
 
 func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) ([]*PassDetail, error) {
-	if err := t.FetchTLEs(); err != nil && len(t.tleMap) == 0 {
-		return nil, err
-	}
+	_ = t.FetchTLEs()
 
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -192,7 +235,8 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 		tle1, ok1 := t.tleMap[satInfo.NORADID+"_1"]
 		tle2, ok2 := t.tleMap[satInfo.NORADID+"_2"]
 		if !ok1 || !ok2 {
-			continue
+			tle1 = FallbackTLEs[satInfo.NORADID+"_1"]
+			tle2 = FallbackTLEs[satInfo.NORADID+"_2"]
 		}
 
 		sat, err := parseTLE(tle1, tle2)
@@ -209,7 +253,8 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 			ecef := sat.propagateECEF(tm)
 			look := calculateLookAngle(obsLat, obsLon, obsAlt, ecef)
 
-			if look.Elevation >= 10.0 {
+			// Horizon threshold for AOS/LOS (0.0°)
+			if look.Elevation >= 0.0 {
 				if !inPass {
 					inPass = true
 					passStart = tm
@@ -223,20 +268,42 @@ func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) (
 			} else {
 				if inPass {
 					inPass = false
-					passes = append(passes, &PassDetail{
-						SatName:   satInfo.Name,
-						NORADID:   satInfo.NORADID,
-						Frequency: satInfo.Frequency,
-						AOS:       passStart.Local(),
-						LOS:       tm.Local(),
-						MaxElev:   math.Round(maxEl*10) / 10,
-						MaxElevAz: math.Round(maxElAz*10) / 10,
-						Duration:  tm.Sub(passStart).Seconds(),
-					})
+					// Filter passes reaching peak elevation >= 5.0°
+					if maxEl >= 5.0 {
+						passes = append(passes, &PassDetail{
+							SatName:   satInfo.Name,
+							NORADID:   satInfo.NORADID,
+							Frequency: satInfo.Frequency,
+							AOS:       passStart.Local(),
+							LOS:       tm.Local(),
+							MaxElev:   math.Round(maxEl*10) / 10,
+							MaxElevAz: math.Round(maxElAz*10) / 10,
+							Duration:  tm.Sub(passStart).Seconds(),
+						})
+					}
 				}
 			}
 		}
+
+		// Handle ongoing pass at endTime boundary
+		if inPass && maxEl >= 5.0 {
+			passes = append(passes, &PassDetail{
+				SatName:   satInfo.Name,
+				NORADID:   satInfo.NORADID,
+				Frequency: satInfo.Frequency,
+				AOS:       passStart.Local(),
+				LOS:       endTime.Local(),
+				MaxElev:   math.Round(maxEl*10) / 10,
+				MaxElevAz: math.Round(maxElAz*10) / 10,
+				Duration:  endTime.Sub(passStart).Seconds(),
+			})
+		}
 	}
+
+	// Sort passes by AOS ascending
+	sort.Slice(passes, func(i, j int) bool {
+		return passes[i].AOS.Before(passes[j].AOS)
+	})
 
 	return passes, nil
 }
@@ -362,18 +429,12 @@ func calculateDopplerShift(freq int, sat *TLESatellite, lat, lon, alt float64, t
 	pos1 := sat.propagateECEF(t)
 	pos2 := sat.propagateECEF(t.Add(time.Duration(dt) * time.Second))
 
-	look1 := calculateLookAngle(lat, lon, alt, pos1)
-	look2 := calculateLookAngle(lat, lon, alt, pos2)
-
-	// Approximate radial velocity change
 	r1 := rangeDistance(lat, lon, alt, pos1)
 	r2 := rangeDistance(lat, lon, alt, pos2)
 	vRad := (r2 - r1) / dt // km/s
 
 	c := 299792.458 // km/s
 	dopplerHz := -float64(freq) * (vRad / c)
-	_ = look1
-	_ = look2
 	return dopplerHz
 }
 

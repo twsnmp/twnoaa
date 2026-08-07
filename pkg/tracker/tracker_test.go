@@ -37,3 +37,22 @@ func TestTargetSatellitesList(t *testing.T) {
 		t.Errorf("Expected NOAA 15 first, got %s", TargetSatellites[0].Name)
 	}
 }
+
+func TestFetchAndCalculateUpcomingPasses(t *testing.T) {
+	tr := NewTracker()
+	err := tr.FetchTLEs()
+	if err != nil {
+		t.Logf("FetchTLEs error (may be offline): %v", err)
+	}
+
+	passes, err := tr.GetUpcomingPasses(36.028, 139.533, 0.02, 24)
+	if err != nil {
+		t.Fatalf("GetUpcomingPasses returned error: %v", err)
+	}
+
+	t.Logf("Found %d upcoming passes in next 24 hours", len(passes))
+	for i, p := range passes {
+		t.Logf("Pass #%d: %s | AOS: %s | LOS: %s | MaxElev: %.1f°",
+			i+1, p.SatName, p.AOS.Format("15:04:05"), p.LOS.Format("15:04:05"), p.MaxElev)
+	}
+}

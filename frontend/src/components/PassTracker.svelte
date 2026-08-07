@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Satellite, Compass, Activity, Calendar, RefreshCw, CheckCircle2, Radio } from '@lucide/svelte'
+  import { Satellite, Calendar, RefreshCw, Radio } from '@lucide/svelte'
 
   let { onSelectPass = () => {} } = $props()
 
@@ -25,6 +25,12 @@
     isLoading = true
     await loadData()
     isLoading = false
+  }
+
+  function formatTime(isoStr) {
+    if (!isoStr) return ''
+    const d = new Date(isoStr)
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
 
   onMount(() => {
@@ -81,7 +87,7 @@
         <div class="grid grid-cols-2 gap-3 text-xs">
           <div class="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
             <span class="text-slate-400 block text-[10px] uppercase font-semibold">{i18n.t('tracker.elevation')}</span>
-            <span class="text-sm font-bold font-mono {sat.elevation >= 10 ? 'text-emerald-400' : 'text-slate-200'}">
+            <span class="text-sm font-bold font-mono {sat.elevation >= 5 ? 'text-emerald-400' : 'text-slate-200'}">
               {sat.elevation}°
             </span>
           </div>
@@ -146,8 +152,8 @@
             <tr class="hover:bg-slate-800/40 transition-colors">
               <td class="py-3 px-4 font-bold text-slate-100 font-sans">{pass.sat_name}</td>
               <td class="py-3 px-4 text-cyan-400">{(pass.frequency / 1e6).toFixed(4)} MHz</td>
-              <td class="py-3 px-4 text-emerald-400">{new Date(pass.aos).toLocaleTimeString()}</td>
-              <td class="py-3 px-4 text-rose-400">{new Date(pass.los).toLocaleTimeString()}</td>
+              <td class="py-3 px-4 text-emerald-400">{formatTime(pass.aos)}</td>
+              <td class="py-3 px-4 text-rose-400">{formatTime(pass.los)}</td>
               <td class="py-3 px-4">
                 <span class="px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-300 font-bold border border-cyan-500/20">
                   {pass.max_elev}° ({pass.max_elev_az}°)
