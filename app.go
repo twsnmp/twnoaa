@@ -62,12 +62,12 @@ func (a *App) SaveConfig(cfg datastore.Config) string {
 	return "Config saved successfully"
 }
 
-func (a *App) FetchIPLocation() (*tracker.IPLocation, string) {
+func (a *App) FetchIPLocation() (*tracker.IPLocation, error) {
 	loc, err := tracker.GetIPLocation()
 	if err != nil {
-		return nil, fmt.Sprintf("Failed to fetch location: %v", err)
+		return nil, fmt.Errorf("Failed to fetch location: %w", err)
 	}
-	return loc, "Location fetched successfully"
+	return loc, nil
 }
 
 // Pass Tracker API

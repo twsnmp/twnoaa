@@ -48,17 +48,15 @@
     if (!window.go?.main?.App) return
     isFetchingLoc = true
     try {
-      const [loc, msg] = await window.go.main.App.FetchIPLocation()
+      const loc = await window.go.main.App.FetchIPLocation()
       if (loc) {
         cfg.observer_lat = loc.lat
         cfg.observer_lon = loc.lon
         cfg.observer_city = loc.city
-        saveMsg = 'Location updated: ' + loc.city
-      } else {
-        saveMsg = msg
+        saveMsg = i18n.currentLocale === 'ja' ? '位置情報を更新しました: ' + loc.city : 'Location updated: ' + loc.city
       }
     } catch (err) {
-      saveMsg = 'Failed to fetch location: ' + err
+      saveMsg = i18n.currentLocale === 'ja' ? '位置情報の取得に失敗しました: ' + err : 'Failed to fetch location: ' + err
     } finally {
       isFetchingLoc = false
     }
@@ -76,7 +74,7 @@
         <Settings class="w-5 h-5 text-cyan-400" />
         {i18n.t('settings.title')}
       </h2>
-      <p class="text-xs text-slate-400 mt-1">Observer Station Coordinates, SDR & LLM API Configuration</p>
+      <p class="text-xs text-slate-400 mt-1">{i18n.t('settings.subtitle')}</p>
     </div>
 
     <button
@@ -101,7 +99,7 @@
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
           <MapPin class="w-4 h-4 text-cyan-400" />
-          Observer Location Coordinates
+          {i18n.t('settings.observerTitle')}
         </h3>
 
         <button
@@ -176,12 +174,12 @@
         />
         <div>
           <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.simMode')}</span>
-          <span class="text-[10px] text-slate-500 block">Synthesize IQ signal offline for testing without RTL-SDR hardware.</span>
+          <span class="text-[10px] text-slate-500 block">{i18n.t('settings.simDesc')}</span>
         </div>
       </label>
 
       <div>
-        <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">Default Tuner Gain (dB * 10)</label>
+        <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.defaultGain')}</label>
         <input
           id="default-gain-input"
           type="number"
@@ -200,7 +198,7 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label for="provider-select" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">Active AI Provider</label>
+          <label for="provider-select" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.activeProvider')}</label>
           <select
             id="provider-select"
             bind:value={cfg.active_provider}
@@ -223,7 +221,7 @@
             />
             <div>
               <span class="text-xs font-bold text-slate-200 block">{i18n.t('ai.autoAnalyze')}</span>
-              <span class="text-[10px] text-slate-500 block">Trigger AI meteorological analysis automatically when a pass finishes decoding.</span>
+              <span class="text-[10px] text-slate-500 block">{i18n.t('settings.autoAnalyzeDesc')}</span>
             </div>
           </label>
         </div>
