@@ -293,7 +293,15 @@ func (a *App) RunAIAnalysis(recordID string) string {
 	}
 
 	if target == nil {
-		return "Record not found"
+		return "Error: Record not found"
+	}
+
+	if target.ImagePath == "" {
+		return "Error: No image path for this record"
+	}
+
+	if _, err := os.Stat(target.ImagePath); os.IsNotExist(err) {
+		return "Error: Image file does not exist on disk"
 	}
 
 	cfg := a.store.GetConfig()
