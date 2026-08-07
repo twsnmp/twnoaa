@@ -78,7 +78,8 @@ const translations = {
       aiReady: "AI Analysis Ready",
       imageRes: "Image Resolution: 2080px line scan",
       delete: "Delete Record",
-      deleteConfirm: "Are you sure you want to delete this pass record and its files?",
+      deleteConfirm: "Are you sure you want to delete this pass record and its image files?",
+      cancel: "Cancel",
       imageNotFound: "Image file not found or failed to decode."
     },
     ai: {
@@ -204,6 +205,7 @@ const translations = {
       imageRes: "解像度: 2080px ラインスキャン",
       delete: "レコード削除",
       deleteConfirm: "この受信履歴と関連画像ファイルを削除しますか？",
+      cancel: "キャンセル",
       imageNotFound: "画像ファイルが存在しないか、受信・復調に失敗したデータです。"
     },
     ai: {

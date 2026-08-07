@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image as ImageIcon, Bot, Sparkles, Trash2, AlertTriangle } from '@lucide/svelte'
+  import { Image as ImageIcon, Bot, Sparkles, Trash2, AlertTriangle, X } from '@lucide/svelte'
 
   let { onRunAI = () => {} } = $props()
 
@@ -9,6 +9,7 @@
   let selectedRecord = $state(null)
   let activeChannel = $state('full')
   let currentImageBase64 = $state('')
+  let recordToDelete = $state(null)
 
   async function loadRecords() {
     if (window.go?.main?.App) {
@@ -54,14 +55,23 @@
     updateImageSrc()
   })
 
-  async function deleteRecord(rec, e) {
-    if (e) e.stopPropagation()
-    if (!confirm(i18n.t('gallery.deleteConfirm'))) return
+  function promptDelete(rec, e) {
+    if (e) {
+      e.stopPropagation()
+      e.preventDefault()
+    }
+    recordToDelete = rec
+  }
+
+  async function confirmDelete() {
+    if (!recordToDelete) return
+    const recId = recordToDelete.id
+    recordToDelete = null
 
     if (window.go?.main?.App) {
       try {
-        await window.go.main.App.DeletePassRecord(rec.id)
-        if (selectedRecord?.id === rec.id) {
+        await window.go.main.App.DeletePassRecord(recId)
+        if (selectedRecord?.id === recId) {
           selectedRecord = null
         }
         await loadRecords()
@@ -69,6 +79,10 @@
         console.error("Failed to delete record:", err)
       }
     }
+  }
+
+  function cancelDelete() {
+    recordToDelete = null
   }
 
   onMount(() => {
@@ -131,7 +145,8 @@
                 {/if}
 
                 <button
-                  onclick={(e) => deleteRecord(rec, e)}
+                  type="button"
+                  onclick={(e) => promptDelete(rec, e)}
                   class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all"
                   title={i18n.t('gallery.delete')}
                 >
@@ -177,7 +192,8 @@
               </div>
 
               <button
-                onclick={(e) => deleteRecord(selectedRecord, e)}
+                type="button"
+                onclick={(e) => promptDelete(selectedRecord, e)}
                 class="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/30 text-xs font-medium flex items-center gap-1.5 transition-all"
                 title={i18n.t('gallery.delete')}
               >
@@ -219,3 +235,49 @@
     </div>
   {/if}
 </div>
+
+<!-- Custom Delete Confirmation Modal -->
+{#if recordToDelete}
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-red-400">
+          <div class="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <Trash2 class="w-5 h-5 text-red-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('gallery.delete')}</h3>
+            <p class="text-xs text-slate-400 font-mono mt-0.5">{recordToDelete.sat_name} ({new Date(recordToDelete.timestamp).toLocaleString()})</p>
+          </div>
+        </div>
+        <button
+          onclick={cancelDelete}
+          class="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed">
+        {i18n.t('gallery.deleteConfirm')}
+      </p>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onclick={cancelDelete}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+        <button
+          type="button"
+          onclick={confirmDelete}
+          class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-red-600/30 transition-all"
+        >
+          {i18n.t('gallery.delete')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
