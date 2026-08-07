@@ -87,7 +87,7 @@
         {#if sat.is_active}
           <div class="absolute top-0 right-0 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-bl-xl border-l border-b border-emerald-500/30 flex items-center gap-1.5">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-            ACTIVE PASS
+            {i18n.t('tracker.activePass')}
           </div>
         {/if}
 
@@ -124,7 +124,7 @@
           </div>
 
           <div class="bg-slate-950/60 p-2 rounded-lg border border-slate-800/80">
-            <span class="text-slate-400 block text-[9px] uppercase font-semibold">Position</span>
+            <span class="text-slate-400 block text-[9px] uppercase font-semibold">{i18n.t('tracker.position')}</span>
             <span class="text-[10px] font-mono text-slate-300">
               {sat.latitude}°, {sat.longitude}°
             </span>
@@ -137,7 +137,7 @@
             class="w-full mt-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors shadow-md shadow-emerald-600/30 flex items-center justify-center gap-1.5"
           >
             <Radio class="w-3.5 h-3.5" />
-            Tune & Receive Now
+            {i18n.t('tracker.tuneNow')}
           </button>
         {/if}
       </div>
@@ -161,7 +161,7 @@
             <th class="py-2.5 px-3.5">{i18n.t('tracker.los')}</th>
             <th class="py-2.5 px-3.5">{i18n.t('tracker.maxElev')}</th>
             <th class="py-2.5 px-3.5">{i18n.t('tracker.duration')}</th>
-            <th class="py-2.5 px-3.5 text-right">Action</th>
+            <th class="py-2.5 px-3.5 text-right">{i18n.t('tracker.action')}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-800/60 font-mono text-slate-300">
@@ -182,7 +182,7 @@
                   onclick={() => onSelectPass(pass.sat_name, pass.frequency)}
                   class="px-2 py-0.5 bg-slate-800 hover:bg-cyan-600 text-slate-300 hover:text-white rounded-lg text-[11px] font-sans font-medium transition-colors"
                 >
-                  Tune Receiver
+                  {i18n.t('tracker.tune')}
                 </button>
               </td>
             </tr>
@@ -191,7 +191,7 @@
           {#if upcomingPasses.length === 0}
             <tr>
               <td colspan="7" class="py-6 text-center text-slate-500 font-sans">
-                No upcoming satellite passes detected in the next 24 hours.
+                {i18n.t('tracker.noPasses')}
               </td>
             </tr>
           {/if}

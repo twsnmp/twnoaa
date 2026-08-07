@@ -42,14 +42,14 @@
         <ImageIcon class="w-5 h-5 text-cyan-400" />
         {i18n.t('gallery.title')}
       </h2>
-      <p class="text-xs text-slate-400 mt-1">Decoded APT Satellite PNG Images & Reception History</p>
+      <p class="text-xs text-slate-400 mt-1">{i18n.t('gallery.subtitle')}</p>
     </div>
   </div>
 
   {#if records.length === 0}
     <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
       <ImageIcon class="w-12 h-12 text-slate-600 mx-auto" />
-      <h3 class="text-base font-semibold text-slate-300">No Decoded APT Images Yet</h3>
+      <h3 class="text-base font-semibold text-slate-300">{i18n.t('gallery.noImages')}</h3>
       <p class="text-xs text-slate-500 max-w-md mx-auto">
         {i18n.t('gallery.empty')}
       </p>
@@ -57,7 +57,7 @@
   {:else}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
-        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">Decoded Passes ({records.length})</h3>
+        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">{i18n.t('gallery.decodedPasses')} ({records.length})</h3>
 
         <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
           {#each records as rec}
@@ -72,7 +72,7 @@
               </div>
 
               {#if rec.ai_analysis}
-                <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30" title="AI Analysis Ready">
+                <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30" title={i18n.t('gallery.aiReady')}>
                   <Sparkles class="w-3.5 h-3.5" />
                 </span>
               {/if}
@@ -89,7 +89,7 @@
                 {selectedRecord.sat_name}
                 <span class="text-xs font-mono text-cyan-400 font-normal">({(selectedRecord.frequency / 1e6).toFixed(4)} MHz)</span>
               </h3>
-              <p class="text-xs text-slate-400">{new Date(selectedRecord.timestamp).toLocaleString()} • Max Elev: {selectedRecord.max_elevation}°</p>
+              <p class="text-xs text-slate-400">{new Date(selectedRecord.timestamp).toLocaleString()} • {i18n.t('gallery.maxElevLabel')} {selectedRecord.max_elevation}°</p>
             </div>
 
             <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
@@ -123,7 +123,7 @@
           </div>
 
           <div class="flex items-center justify-between pt-2">
-            <span class="text-xs text-slate-500 font-mono">Image Resolution: 2080px line scan</span>
+            <span class="text-xs text-slate-500 font-mono">{i18n.t('gallery.imageRes')}</span>
             <button
               onclick={() => onRunAI(selectedRecord)}
               class="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 flex items-center gap-2 transition-all"

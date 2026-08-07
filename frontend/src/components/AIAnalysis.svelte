@@ -13,13 +13,13 @@
   async function triggerAnalysis() {
     if (!record || !window.go?.main?.App) return
     isAnalyzing = true
-    statusMsg = 'Running multi-modal LLM meteorological analysis...'
+    statusMsg = i18n.t('ai.statusRunning')
 
     try {
       const res = await window.go.main.App.RunAIAnalysis(record.id)
       statusMsg = res
     } catch (err) {
-      statusMsg = 'Error starting AI analysis: ' + err
+      statusMsg = i18n.t('ai.statusError') + err
       isAnalyzing = false
     }
   }
@@ -30,13 +30,13 @@
         if (record && updatedRec.id === record.id) {
           record = updatedRec
           isAnalyzing = false
-          statusMsg = 'Analysis completed successfully!'
+          statusMsg = i18n.t('ai.statusCompleted')
         }
       })
 
       window.runtime.EventsOn('ai_error', (errMsg) => {
         isAnalyzing = false
-        statusMsg = 'AI Analysis Failed: ' + errMsg
+        statusMsg = i18n.t('ai.statusFailed') + errMsg
       })
     }
   })
@@ -49,14 +49,14 @@
         <Bot class="w-5 h-5 text-cyan-400" />
         {i18n.t('ai.title')}
       </h2>
-      <p class="text-xs text-slate-400 mt-1">Multi-modal Meteorological LLM Engine (Gemini / OpenAI / Ollama / Anthropic)</p>
+      <p class="text-xs text-slate-400 mt-1">{i18n.t('ai.subtitle')}</p>
     </div>
   </div>
 
   {#if !record}
     <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
       <Bot class="w-12 h-12 text-slate-600 mx-auto" />
-      <h3 class="text-base font-semibold text-slate-300">No Pass Selected for Analysis</h3>
+      <h3 class="text-base font-semibold text-slate-300">{i18n.t('ai.noPassSelected')}</h3>
       <p class="text-xs text-slate-500 max-w-md mx-auto">
         {i18n.t('ai.noAnalysis')}
       </p>
@@ -93,7 +93,7 @@
       <div class="bg-slate-950 rounded-xl border border-slate-800 p-6 space-y-4">
         <h4 class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2 border-b border-slate-800 pb-3">
           <FileText class="w-4 h-4 text-cyan-400" />
-          AI Meteorological Report
+          {i18n.t('ai.reportTitle')}
         </h4>
 
         {#if analysisResult}
@@ -102,7 +102,7 @@
           </div>
         {:else}
           <div class="py-12 text-center text-slate-500 text-xs">
-            No analysis report generated yet. Click "Run AI Meteorological Analysis" to generate insights.
+            {i18n.t('ai.noReport')}
           </div>
         {/if}
       </div>

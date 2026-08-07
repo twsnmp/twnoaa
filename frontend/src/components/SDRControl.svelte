@@ -18,6 +18,14 @@
   let canvasEl
   let ctx
 
+  function getDeviceDisplayName(info) {
+    if (!info) return ''
+    if (info.count > 0) {
+      return i18n.t('sdr.deviceFound').replace('{id}', '0').replace('{count}', info.count)
+    }
+    return i18n.t('sdr.noHardware')
+  }
+
   async function loadSDRInfo() {
     if (window.go?.main?.App) {
       try {
@@ -42,14 +50,14 @@
   async function startRecord() {
     if (!window.go?.main?.App) return
     isRecording = true
-    recordStatus = 'Recording 30s pass & demodulating FM...'
+    recordStatus = i18n.t('sdr.recordingProgress')
 
     try {
       const satName = centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19')
       const msg = await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, 30)
       recordStatus = msg
     } catch (err) {
-      recordStatus = 'Recording error: ' + err
+      recordStatus = i18n.t('sdr.decodeFailed') + err
       isRecording = false
     }
   }
@@ -75,13 +83,13 @@
 
       window.runtime.EventsOn('decode_complete', (record) => {
         isRecording = false
-        recordStatus = 'Decoding Complete! View image in Gallery.'
+        recordStatus = i18n.t('sdr.decodeSuccess')
         onDecoded(record)
       })
 
       window.runtime.EventsOn('decode_error', (errMsg) => {
         isRecording = false
-        recordStatus = 'Decode Failed: ' + errMsg
+        recordStatus = i18n.t('sdr.decodeFailed') + errMsg
       })
     }
   })
@@ -131,12 +139,12 @@
         <Cpu class="w-5 h-5" />
       </div>
       <div>
-        <h3 class="text-sm font-bold text-slate-100">{sdrInfo.name}</h3>
+        <h3 class="text-sm font-bold text-slate-100">{getDeviceDisplayName(sdrInfo)}</h3>
         <p class="text-xs text-slate-400 font-mono">
           {#if sdrInfo.is_present && !forceSim}
-            Direct librtlsdr Hardware Control Active
+            {i18n.t('sdr.hwActive')}
           {:else}
-            Software IQ Simulation Engine Active
+            {i18n.t('sdr.simActive')}
           {/if}
         </p>
       </div>
@@ -145,7 +153,7 @@
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-2 text-xs font-semibold text-slate-300 cursor-pointer">
         <input type="checkbox" bind:checked={forceSim} class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-cyan-500" />
-        Force Sim Mode
+        {i18n.t('sdr.forceSim')}
       </label>
 
       <button
@@ -168,12 +176,12 @@
     <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-5">
       <h3 class="text-base font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
         <Sliders class="w-4 h-4 text-cyan-400" />
-        Tuning & Demodulator
+        {i18n.t('sdr.tuningTitle')}
       </h3>
 
       <!-- Preset Buttons -->
       <div>
-        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">NOAA Satellite Presets</span>
+        <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">{i18n.t('sdr.presets')}</span>
         <div class="grid grid-cols-3 gap-2">
           <button
             onclick={() => tunePreset(137620000)}
@@ -203,7 +211,7 @@
 
       <!-- Frequency Input -->
       <div>
-        <label for="freq-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">Center Frequency (Hz)</label>
+        <label for="freq-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('sdr.centerFreq')}</label>
         <input
           id="freq-input"
           type="number"
@@ -216,7 +224,7 @@
       <!-- Gain Slider -->
       <div>
         <div class="flex items-center justify-between mb-1">
-          <label for="gain-slider" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tuner Gain</label>
+          <label for="gain-slider" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">{i18n.t('sdr.gain')}</label>
           <span class="text-xs font-mono text-cyan-400 font-bold">{(tunerGain / 10).toFixed(1)} dB</span>
         </div>
         <input
@@ -259,7 +267,7 @@
         </h3>
 
         <div class="flex items-center gap-2 text-xs font-mono text-slate-400">
-          <span>137 MHz Band</span>
+          <span>{i18n.t('sdr.band137')}</span>
           <span class="w-2 h-2 rounded-full {isStreaming ? 'bg-emerald-400 animate-ping' : 'bg-slate-600'}"></span>
         </div>
       </div>
@@ -275,11 +283,12 @@
         {#if !isStreaming}
           <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
             <Radio class="w-12 h-12 text-slate-600 mb-3" />
-            <p class="text-sm font-semibold text-slate-300">Stream Paused</p>
-            <p class="text-xs text-slate-500 mt-1">Click "Start Stream" above to visualize real-time RF spectrum waterfall.</p>
+            <p class="text-sm font-semibold text-slate-300">{i18n.t('sdr.streamPaused')}</p>
+            <p class="text-xs text-slate-500 mt-1">{i18n.t('sdr.streamPausedHint')}</p>
           </div>
         {/if}
       </div>
     </div>
   </div>
 </div>
+

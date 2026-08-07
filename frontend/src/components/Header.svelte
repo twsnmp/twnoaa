@@ -21,7 +21,7 @@
           v1.0.0
         </span>
       </h1>
-      <p class="text-xs text-slate-400 font-medium">NOAA Weather Satellite Receiver & AI Engine</p>
+      <p class="text-xs text-slate-400 font-medium">{i18n.t('subtitle')}</p>
     </div>
   </div>
 
