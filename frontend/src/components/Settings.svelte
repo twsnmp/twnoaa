@@ -8,7 +8,7 @@
     observer_lon: 139.533,
     observer_alt: 0.02,
     observer_city: 'Kitamoto, Saitama',
-    active_provider: 'gemini',
+    active_provider: 'ollama',
     api_key_gemini: '',
     api_key_openai: '',
     api_key_anthropic: '',
@@ -206,9 +206,9 @@
             bind:value={cfg.active_provider}
             class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:border-cyan-500"
           >
-            <option value="gemini">Google Gemini (Recommended)</option>
-            <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
             <option value="ollama">Ollama (Local LLM)</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
           </select>
         </div>
 
@@ -228,48 +228,51 @@
         </div>
       </div>
 
+      <!-- Dynamic LLM Fields: Show only settings relevant to active_provider -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/80">
-        <div>
-          <label for="gemini-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.geminiKey')}</label>
-          <input
-            id="gemini-key-input"
-            type="password"
-            bind:value={cfg.api_key_gemini}
-            placeholder="AIzaSy..."
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
-          />
-        </div>
+        {#if cfg.active_provider === 'ollama'}
+          <div>
+            <label for="ollama-url-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.ollamaUrl')}</label>
+            <input
+              id="ollama-url-input"
+              type="text"
+              bind:value={cfg.ollama_url}
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
 
-        <div>
-          <label for="openai-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openaiKey')}</label>
-          <input
-            id="openai-key-input"
-            type="password"
-            bind:value={cfg.api_key_openai}
-            placeholder="sk-..."
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
-          />
-        </div>
-
-        <div>
-          <label for="ollama-url-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.ollamaUrl')}</label>
-          <input
-            id="ollama-url-input"
-            type="text"
-            bind:value={cfg.ollama_url}
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
-          />
-        </div>
-
-        <div>
-          <label for="ollama-model-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.ollamaModel')}</label>
-          <input
-            id="ollama-model-input"
-            type="text"
-            bind:value={cfg.ollama_model}
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
-          />
-        </div>
+          <div>
+            <label for="ollama-model-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.ollamaModel')}</label>
+            <input
+              id="ollama-model-input"
+              type="text"
+              bind:value={cfg.ollama_model}
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        {:else if cfg.active_provider === 'gemini'}
+          <div class="md:col-span-2">
+            <label for="gemini-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.geminiKey')}</label>
+            <input
+              id="gemini-key-input"
+              type="password"
+              bind:value={cfg.api_key_gemini}
+              placeholder="AIzaSy..."
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        {:else if cfg.active_provider === 'openai'}
+          <div class="md:col-span-2">
+            <label for="openai-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openaiKey')}</label>
+            <input
+              id="openai-key-input"
+              type="password"
+              bind:value={cfg.api_key_openai}
+              placeholder="sk-..."
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+        {/if}
       </div>
     </div>
   </div>

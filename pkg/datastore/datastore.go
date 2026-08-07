@@ -79,7 +79,7 @@ func NewStore() (*Store, error) {
 			ObserverLon:    139.533,
 			ObserverAlt:    0.02,
 			ObserverCity:   "Kitamoto, Saitama",
-			ActiveProvider: "gemini",
+			ActiveProvider: "ollama",
 			OllamaURL:      "http://localhost:11434",
 			OllamaModel:    "llama3",
 			AutoAnalyze:    true,
