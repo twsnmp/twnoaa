@@ -14,7 +14,8 @@
   async function loadRecords() {
     if (window.go?.main?.App) {
       try {
-        records = await window.go.main.App.GetPassRecords()
+        const fetched = await window.go.main.App.GetPassRecords()
+        records = (fetched && Array.isArray(fetched)) ? [...fetched] : []
         if (records.length > 0) {
           if (!selectedRecord || !records.find(r => r.id === selectedRecord.id)) {
             selectedRecord = records[0]
@@ -24,6 +25,7 @@
         }
       } catch (err) {
         console.error("Failed to load pass records:", err)
+        records = []
       }
     }
   }
@@ -68,12 +70,15 @@
     const recId = recordToDelete.id
     recordToDelete = null
 
+    // Optimistically update frontend state immediately for responsive UI
+    records = records.filter(r => r.id !== recId)
+    if (selectedRecord?.id === recId) {
+      selectedRecord = records.length > 0 ? records[0] : null
+    }
+
     if (window.go?.main?.App) {
       try {
         await window.go.main.App.DeletePassRecord(recId)
-        if (selectedRecord?.id === recId) {
-          selectedRecord = null
-        }
         await loadRecords()
       } catch (err) {
         console.error("Failed to delete record:", err)

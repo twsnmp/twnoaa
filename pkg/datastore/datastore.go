@@ -241,7 +241,7 @@ func (s *Store) GetRecords() []*PassRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var records []*PassRecord
+	records := []*PassRecord{}
 	_ = s.conn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketRecords)
 		if b == nil {
