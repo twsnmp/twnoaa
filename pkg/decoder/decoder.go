@@ -25,6 +25,11 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 		return nil, fmt.Errorf("no audio samples provided")
 	}
 
+	// Ensure output directory exists
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create output directory %s: %w", outDir, err)
+	}
+
 	// 1. Extract AM envelope
 	envelope := extractEnvelope(samples)
 
@@ -43,6 +48,9 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 	if len(rawLines) == 0 {
 		return nil, fmt.Errorf("insufficient audio duration to decode APT image")
 	}
+
+	// Dynamic contrast normalization to avoid white-saturation when RF signal power is strong
+	rawLines = normalizeLines(rawLines)
 
 	// 3. Find global Sync A pulse offset across column sums
 	globalOffset := findGlobalSyncOffset(rawLines)
@@ -151,7 +159,7 @@ func resampleLine(input []float64, targetLen int) []uint8 {
 		frac := srcIdx - float64(idx0)
 
 		val := (1.0-frac)*input[idx0] + frac*input[idx1]
-		pixelVal := val * 2.8 * 255.0
+		pixelVal := val * 2.0 * 255.0
 		if pixelVal > 255 {
 			pixelVal = 255
 		}
@@ -162,6 +170,50 @@ func resampleLine(input []float64, targetLen int) []uint8 {
 		output[i] = uint8(pixelVal)
 	}
 	return output
+}
+
+func normalizeLines(lines [][]uint8) [][]uint8 {
+	if len(lines) == 0 {
+		return lines
+	}
+	minV := uint8(255)
+	maxV := uint8(0)
+
+	for y := 0; y < len(lines); y++ {
+		for x := 0; x < len(lines[y]); x++ {
+			v := lines[y][x]
+			if v < minV {
+				minV = v
+			}
+			if v > maxV {
+				maxV = v
+			}
+		}
+	}
+
+	if maxV <= minV || (maxV-minV) < 10 {
+		return lines
+	}
+
+	minF := float64(minV)
+	rngF := float64(maxV - minV)
+	normalized := make([][]uint8, len(lines))
+
+	for y := 0; y < len(lines); y++ {
+		normalized[y] = make([]uint8, len(lines[y]))
+		for x := 0; x < len(lines[y]); x++ {
+			v := float64(lines[y][x]) - minF
+			val := (v / rngF) * 255.0
+			if val > 255 {
+				val = 255
+			}
+			if val < 0 {
+				val = 0
+			}
+			normalized[y][x] = uint8(val)
+		}
+	}
+	return normalized
 }
 
 func extractSubImage(lines [][]uint8, startX, endX int) [][]uint8 {
