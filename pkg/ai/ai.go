@@ -37,6 +37,7 @@ type AnalysisRequest struct {
 	ObserverLon   float64 `json:"observer_lon"`
 	MaxElevation  float64 `json:"max_elevation"`
 	ImagePath     string  `json:"image_path"`
+	Lang          string  `json:"lang"`
 }
 
 func AnalyzeSatelliteImage(ctx context.Context, cfg datastore.Config, req AnalysisRequest) (string, error) {
@@ -95,7 +96,33 @@ func AnalyzeSatelliteImage(ctx context.Context, cfg datastore.Config, req Analys
 		}
 	}
 
-	systemPrompt := `You are an expert meteorologist analyzing a newly received APT (Automatic Picture Transmission) image from a NOAA weather satellite captured via an amateur RTL-SDR ground station.
+	var systemPrompt string
+	var userPrompt string
+
+	if strings.ToLower(req.Lang) == "en" {
+		systemPrompt = `You are an expert meteorologist analyzing a newly received APT (Automatic Picture Transmission) image from a NOAA weather satellite captured via an amateur RTL-SDR ground station.
+
+Provide a clear, highly detailed, professional weather report strictly in English Markdown format.
+Structure your report with:
+1. **Reception Summary**: Satellite name, pass time, elevation, and ground observer location.
+2. **Channel A & B Analysis**:
+   - Channel A (Visible Light): Reflectivity, daytime cloud cover, coastal boundaries, and land surface details.
+   - Channel B (Infrared): Cloud top temperatures, high-altitude cirrus clouds, and convection activity.
+3. **Meteorological Features Identification**:
+   - Low-pressure vortices, frontal systems, tropical depression structures, maritime cloud streets.
+4. **Forecaster Notes & Practical Takeaways**.`
+
+		userPrompt = fmt.Sprintf(`APT Satellite Reception Metadata:
+- **Satellite**: %s
+- **Frequency**: %.4f MHz
+- **Timestamp**: %s
+- **Location**: %s (Lat: %.3f°N, Lon: %.3f°E)
+- **Max Elevation**: %.1f°
+
+Analyze the above reception metadata and attached image as a professional meteorologist, and generate a comprehensive meteorological analysis report in English Markdown.`,
+			req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation)
+	} else {
+		systemPrompt = `You are an expert meteorologist analyzing a newly received APT (Automatic Picture Transmission) image from a NOAA weather satellite captured via an amateur RTL-SDR ground station.
 
 Provide a clear, highly detailed, professional weather report in Japanese Markdown.
 Structure your report with:
@@ -107,7 +134,7 @@ Structure your report with:
    - Low-pressure vortices (低気圧の渦), frontal systems (温暖・寒冷前線), typhoon / tropical depression structures, maritime cloud streets.
 4. **観測インサイト・予報コメント (Forecaster Notes & Practical Takeaways)**.`
 
-	userPrompt := fmt.Sprintf(`気象衛星APT受信用メタデータ:
+		userPrompt = fmt.Sprintf(`気象衛星APT受信用メタデータ:
 - **対象衛星名**: %s
 - **中心周波数**: %.4f MHz
 - **受信日時**: %s
@@ -115,7 +142,8 @@ Structure your report with:
 - **最大仰角 (Max Elevation)**: %.1f°
 
 上記の受信用データおよび添付画像を分析し、プロの気象予報士として日本語Markdown形式で詳細な画像解析結果を出力してください。`,
-		req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation)
+			req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation)
+	}
 
 	parts := []llms.ContentPart{
 		llms.TextPart(userPrompt),

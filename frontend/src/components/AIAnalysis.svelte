@@ -51,7 +51,7 @@
     statusMsg = i18n.t('ai.statusRunning')
 
     try {
-      const res = await window.go.main.App.RunAIAnalysis(record.id)
+      const res = await window.go.main.App.RunAIAnalysis(record.id, i18n.currentLocale)
       if (res && res.startsWith("Error:")) {
         statusMsg = i18n.t('ai.statusError') + res
         isAnalyzing = false

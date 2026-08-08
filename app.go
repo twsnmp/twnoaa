@@ -271,7 +271,7 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 
 		// Auto AI analysis if enabled
 		if cfg.AutoAnalyze {
-			a.RunAIAnalysis(record.ID)
+			a.RunAIAnalysis(record.ID, "ja")
 		}
 	}()
 
@@ -282,7 +282,7 @@ func (a *App) GetPassRecords() []*datastore.PassRecord {
 	return a.store.GetRecords()
 }
 
-func (a *App) RunAIAnalysis(recordID string) string {
+func (a *App) RunAIAnalysis(recordID string, lang string) string {
 	records := a.store.GetRecords()
 	var target *datastore.PassRecord
 	for _, r := range records {
@@ -304,6 +304,10 @@ func (a *App) RunAIAnalysis(recordID string) string {
 		return "Error: Image file does not exist on disk"
 	}
 
+	if lang == "" {
+		lang = "ja"
+	}
+
 	cfg := a.store.GetConfig()
 	req := ai.AnalysisRequest{
 		SatelliteName: target.SatName,
@@ -314,6 +318,7 @@ func (a *App) RunAIAnalysis(recordID string) string {
 		ObserverLon:   target.ObserverLon,
 		MaxElevation:  target.MaxElevation,
 		ImagePath:     filepath.Clean(target.ImagePath),
+		Lang:          lang,
 	}
 
 	go func() {
