@@ -89,10 +89,10 @@ func AnalyzeSatelliteImage(ctx context.Context, cfg datastore.Config, req Analys
 	}
 
 	// Read image file if exists
-	var imgBase64 string
+	var imgData []byte
 	if req.ImagePath != "" {
-		if imgData, err := os.ReadFile(req.ImagePath); err == nil {
-			imgBase64 = base64.StdEncoding.EncodeToString(imgData)
+		if data, err := os.ReadFile(req.ImagePath); err == nil {
+			imgData = data
 		}
 	}
 
@@ -122,8 +122,8 @@ Structure your report with:
 		llms.TextPart(userPrompt),
 	}
 
-	if imgBase64 != "" {
-		parts = append(parts, llms.BinaryPart("image/png", []byte(imgBase64)))
+	if len(imgData) > 0 {
+		parts = append(parts, llms.BinaryPart("image/png", imgData))
 	}
 
 	messages := []llms.MessageContent{
