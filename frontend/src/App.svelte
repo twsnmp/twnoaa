@@ -1,6 +1,7 @@
 <script>
   import Header from './components/Header.svelte'
   import PassTracker from './components/PassTracker.svelte'
+  import Globe from './components/Globe.svelte'
   import SDRControl from './components/SDRControl.svelte'
   import ImageGallery from './components/ImageGallery.svelte'
   import AIAnalysis from './components/AIAnalysis.svelte'
@@ -34,6 +35,8 @@
   <main class="flex-1 overflow-hidden relative">
     {#if activeTab === 'tracker'}
       <PassTracker onSelectPass={handleSelectPass} />
+    {:else if activeTab === 'globe'}
+      <Globe onSelectPass={handleSelectPass} />
     {:else if activeTab === 'sdr'}
       <SDRControl initialFreq={selectedFreq} initialSat={selectedSat} onDecoded={handleDecoded} />
     {:else if activeTab === 'gallery'}

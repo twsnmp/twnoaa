@@ -17,6 +17,8 @@
     "vite": "^8.1.5"
   },
   "dependencies": {
-    "@lucide/svelte": "^1.16.0"
+    "@lucide/svelte": "^1.16.0",
+    "echarts": "^6.1.0",
+    "echarts-gl": "^2.1.0"
   }
 }

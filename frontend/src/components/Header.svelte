@@ -35,6 +35,14 @@
     </button>
 
     <button
+      onclick={() => onTabChange('globe')}
+      class="px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all {activeTab === 'globe' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}"
+    >
+      <Globe class="w-4 h-4" />
+      {i18n.t('tabs.globe')}
+    </button>
+
+    <button
       onclick={() => onTabChange('sdr')}
       class="px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all {activeTab === 'sdr' ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}"
     >

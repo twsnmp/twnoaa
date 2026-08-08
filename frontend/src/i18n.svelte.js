@@ -4,10 +4,17 @@ const translations = {
     subtitle: "NOAA Weather Satellite Receiver & AI Engine",
     tabs: {
       tracker: "Pass Tracker",
+      globe: "3D Orbit",
       sdr: "SDR Receiver",
       gallery: "APT Gallery",
       ai: "AI Analysis",
       settings: "Settings"
+    },
+    globe: {
+      title: "3D Satellite Orbit Watch",
+      subtitle: "Interactive 3D Earth Globe & Orbit Visualizer",
+      station: "Observer Station",
+      activeSats: "Weather Satellites"
     },
     status: {
       active: "RECEIVING SATELLITE",
@@ -77,6 +84,9 @@ const translations = {
       runAI: "Analyze with AI",
       aiReady: "AI Analysis Ready",
       imageRes: "Image Resolution: 2080px line scan",
+      fitAspect: "Aspect Fit",
+      stretchY: "Stretch Height",
+      clickToZoom: "Click image to view full size",
       delete: "Delete Record",
       deleteConfirm: "Are you sure you want to delete this pass record and its image files?",
       cancel: "Cancel",
@@ -133,10 +143,17 @@ const translations = {
     subtitle: "NOAA 気象衛星受信機 ＆ AI エンジン",
     tabs: {
       tracker: "衛星追跡・パス予測",
+      globe: "3D衛星軌道",
       sdr: "SDR受信用・DSP",
       gallery: "APT画像ギャラリー",
       ai: "AI気象解析",
       settings: "システム設定"
+    },
+    globe: {
+      title: "3D 衛星軌道モニタ",
+      subtitle: "インタラクティブ 3D 地球儀 ＆ 軌道ビジュアル",
+      station: "地上局観測地",
+      activeSats: "気象衛星一覧"
     },
     status: {
       active: "衛星信号受信可能 (ACTIVE)",
@@ -206,6 +223,9 @@ const translations = {
       runAI: "AI気象解析を実行",
       aiReady: "AI解析完了",
       imageRes: "解像度: 2080px ラインスキャン",
+      fitAspect: "標準アスペクト比",
+      stretchY: "縦拡大表示 (視認性重視)",
+      clickToZoom: "クリックで拡大表示",
       delete: "レコード削除",
       deleteConfirm: "この受信履歴と関連画像ファイルを削除しますか？",
       cancel: "キャンセル",

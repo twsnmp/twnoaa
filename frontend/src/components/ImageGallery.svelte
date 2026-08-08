@@ -10,6 +10,8 @@
   let activeChannel = $state('full')
   let currentImageBase64 = $state('')
   let recordToDelete = $state(null)
+  let viewMode = $state('stretch') // 'stretch' | 'fit'
+  let showZoomModal = $state(false)
 
   async function loadRecords() {
     if (window.go?.main?.App) {
@@ -165,9 +167,9 @@
 
       {#if selectedRecord}
         <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
-          <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-3">
             <div>
-              <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2 whitespace-nowrap">
                 {selectedRecord.sat_name}
                 <span class="text-xs font-mono text-cyan-400 font-normal">({(selectedRecord.frequency / 1e6).toFixed(4)} MHz)</span>
               </h3>
@@ -175,6 +177,23 @@
             </div>
 
             <div class="flex items-center gap-3">
+              <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                <button
+                  onclick={() => viewMode = 'stretch'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'stretch' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  title={i18n.t('gallery.stretchY')}
+                >
+                  {i18n.t('gallery.stretchY')}
+                </button>
+                <button
+                  onclick={() => viewMode = 'fit'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'fit' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  title={i18n.t('gallery.fitAspect')}
+                >
+                  {i18n.t('gallery.fitAspect')}
+                </button>
+              </div>
+
               <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
                 <button
                   onclick={() => activeChannel = 'full'}
@@ -210,11 +229,19 @@
 
           <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[360px] flex items-center justify-center p-4">
             {#if currentImageBase64}
-              <img
-                src={currentImageBase64}
-                alt="APT Satellite Capture"
-                class="max-h-[460px] object-contain rounded-lg shadow-xl"
-              />
+              <button
+                type="button"
+                onclick={() => showZoomModal = true}
+                class="w-full flex items-center justify-center group focus:outline-none cursor-zoom-in"
+                title={i18n.t('gallery.clickToZoom')}
+              >
+                <img
+                  src={currentImageBase64}
+                  alt="APT Satellite Capture"
+                  style="image-rendering: pixelated;"
+                  class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full h-[360px] object-fill' : 'max-h-[460px] object-contain'}"
+                />
+              </button>
             {:else}
               <div class="text-center py-12 px-6 space-y-3">
                 <AlertTriangle class="w-10 h-10 text-amber-500/80 mx-auto" />
@@ -240,6 +267,28 @@
     </div>
   {/if}
 </div>
+
+<!-- Image Zoom Modal -->
+{#if showZoomModal && currentImageBase64}
+  <div class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6">
+    <div class="absolute top-4 right-4 flex items-center gap-3">
+      <button
+        onclick={() => showZoomModal = false}
+        class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-all"
+      >
+        <X class="w-5 h-5" />
+      </button>
+    </div>
+    <div class="max-w-5xl w-full max-h-[85vh] overflow-auto p-2 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center">
+      <img
+        src={currentImageBase64}
+        alt="APT Satellite Capture Full Zoom"
+        style="image-rendering: pixelated;"
+        class="w-full object-contain rounded-xl"
+      />
+    </div>
+  </div>
+{/if}
 
 <!-- Custom Delete Confirmation Modal -->
 {#if recordToDelete}
