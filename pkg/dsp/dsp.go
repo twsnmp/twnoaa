@@ -242,6 +242,12 @@ func CalculatePowerSpectrum(buf []byte, numBins int) []float64 {
 		bins[i] = math.Max(0, math.Min(1.0, (pDb+40.0)/35.0))
 	}
 
+	// Remove hardware DC spike artifact at center 0 Hz bin by interpolating adjacent bins
+	centerBin := numBins / 2
+	if centerBin > 0 && centerBin < numBins-1 {
+		bins[centerBin] = (bins[centerBin-1] + bins[centerBin+1]) / 2.0
+	}
+
 	return bins
 }
 
