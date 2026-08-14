@@ -36,6 +36,30 @@
     }
   }
 
+  async function loadConfig() {
+    if (window.go?.main?.App) {
+      try {
+        const cfg = await window.go.main.App.GetConfig()
+        if (cfg) {
+          if (cfg.tuner_gain !== undefined) tunerGain = cfg.tuner_gain
+          if (cfg.tuner_gain_auto !== undefined) autoGain = cfg.tuner_gain_auto
+        }
+      } catch (err) {
+        console.error("Failed to load config:", err)
+      }
+    }
+  }
+
+  async function handleGainChange() {
+    if (isStreaming && window.go?.main?.App) {
+      try {
+        await window.go.main.App.SetSDRGain(Number(tunerGain), autoGain)
+      } catch (err) {
+        console.error("Failed to set SDR gain:", err)
+      }
+    }
+  }
+
   async function toggleStream() {
     if (!window.go?.main?.App) return
     if (isStreaming) {
@@ -71,6 +95,7 @@
 
   onMount(() => {
     loadSDRInfo()
+    loadConfig()
 
     if (canvasEl) {
       ctx = canvasEl.getContext('2d')
@@ -234,8 +259,9 @@
           max="500"
           step="10"
           bind:value={tunerGain}
+          oninput={handleGainChange}
           disabled={autoGain}
-          class="w-full accent-cyan-500 bg-slate-950 rounded-lg h-2"
+          class="w-full accent-cyan-500 bg-slate-950 rounded-lg h-2 cursor-pointer"
         />
       </div>
 
@@ -267,7 +293,7 @@
         </h3>
 
         <div class="flex items-center gap-2 text-xs font-mono text-slate-400">
-          <span>{i18n.t('sdr.band137')}</span>
+          <span>{(centerFreq / 1000000).toFixed(3)} MHz 帯</span>
           <span class="w-2 h-2 rounded-full {isStreaming ? 'bg-emerald-400 animate-ping' : 'bg-slate-600'}"></span>
         </div>
       </div>

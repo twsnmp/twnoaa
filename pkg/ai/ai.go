@@ -29,15 +29,16 @@ func logDebug(format string, args ...any) {
 }
 
 type AnalysisRequest struct {
-	SatelliteName string  `json:"satellite_name"`
-	FrequencyMHz  float64 `json:"frequency_mhz"`
-	TimestampStr  string  `json:"timestamp_str"`
-	ObserverCity  string  `json:"observer_city"`
-	ObserverLat   float64 `json:"observer_lat"`
-	ObserverLon   float64 `json:"observer_lon"`
-	MaxElevation  float64 `json:"max_elevation"`
-	ImagePath     string  `json:"image_path"`
-	Lang          string  `json:"lang"`
+	SatelliteName  string  `json:"satellite_name"`
+	FrequencyMHz   float64 `json:"frequency_mhz"`
+	TimestampStr   string  `json:"timestamp_str"`
+	ObserverCity   string  `json:"observer_city"`
+	ObserverLat    float64 `json:"observer_lat"`
+	ObserverLon    float64 `json:"observer_lon"`
+	MaxElevation   float64 `json:"max_elevation"`
+	MaxElevationAz float64 `json:"max_elevation_az"`
+	ImagePath      string  `json:"image_path"`
+	Lang           string  `json:"lang"`
 }
 
 func AnalyzeSatelliteImage(ctx context.Context, cfg datastore.Config, req AnalysisRequest) (string, error) {
@@ -117,10 +118,10 @@ Structure your report with:
 - **Frequency**: %.4f MHz
 - **Timestamp**: %s
 - **Location**: %s (Lat: %.3f°N, Lon: %.3f°E)
-- **Max Elevation**: %.1f°
+- **Max Elevation**: %.1f° (Azimuth: %.1f°)
 
 Analyze the above reception metadata and attached image as a professional meteorologist, and generate a comprehensive meteorological analysis report in English Markdown.`,
-			req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation)
+			req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation, req.MaxElevationAz)
 	} else {
 		systemPrompt = `You are an expert meteorologist analyzing a newly received APT (Automatic Picture Transmission) image from a NOAA weather satellite captured via an amateur RTL-SDR ground station.
 
@@ -139,10 +140,10 @@ Structure your report with:
 - **中心周波数**: %.4f MHz
 - **受信日時**: %s
 - **観測地**: %s (緯度: %.3f°N, 経度: %.3f°E)
-- **最大仰角 (Max Elevation)**: %.1f°
+- **最大仰角 (Max Elevation)**: %.1f° (方位角: %.1f°)
 
 上記の受信用データおよび添付画像を分析し、プロの気象予報士として日本語Markdown形式で詳細な画像解析結果を出力してください。`,
-			req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation)
+			req.SatelliteName, req.FrequencyMHz, req.TimestampStr, req.ObserverCity, req.ObserverLat, req.ObserverLon, req.MaxElevation, req.MaxElevationAz)
 	}
 
 	parts := []llms.ContentPart{

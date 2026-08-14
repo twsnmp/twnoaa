@@ -7,9 +7,21 @@ import (
 	"os"
 )
 
+// iqLPFAlpha: IQ low-pass filter coefficient.
+// Cutoff ≈ (1-α)/(2π) × f_IQ ≈ 43 kHz, reducing noise bandwidth from 2.08 MHz to 43 kHz.
+// This reduces FM discriminator phase-diff noise by factor (1-α) ≈ 17.7 dB,
+// bringing CNR from ~6 dB to ~24 dB (above FM threshold of 10-12 dB).
+const iqLPFAlpha = 0.87
+
 type DSP struct {
+	sampleRate int
+	targetRate int
 	decimation int
 	prevSample complex128
+	iqLPFState complex128 // IQ low-pass filter state (noise bandwidth reduction)
+	iqDCI      float64    // Running DC estimate for I channel
+	iqDCQ      float64    // Running DC estimate for Q channel
+	dcState    float64    // Audio DC blocker state
 }
 
 func NewDSP(sampleRate, targetAudioRate int) *DSP {
@@ -18,6 +30,8 @@ func NewDSP(sampleRate, targetAudioRate int) *DSP {
 		dec = 1
 	}
 	return &DSP{
+		sampleRate: sampleRate,
+		targetRate: targetAudioRate,
 		decimation: dec,
 	}
 }
@@ -35,38 +49,305 @@ func ConvertIQToComplex(buf []byte) []complex128 {
 
 // DemodulateFM demodulates FM IQ samples into audio PCM float64 (-1.0 to 1.0)
 func (d *DSP) DemodulateFM(iq []complex128) []float64 {
-	audio := make([]float64, 0, len(iq)/d.decimation)
-	for i := 0; i < len(iq); i++ {
-		diff := iq[i] * cmplx.Conj(d.prevSample)
-		phaseDiff := cmplx.Phase(diff) // -PI to +PI
-		d.prevSample = iq[i]
-
-		if i%d.decimation == 0 {
-			audio = append(audio, phaseDiff/math.Pi)
-		}
+	if len(iq) == 0 {
+		return nil
 	}
+
+	if d.decimation <= 1 {
+		audio := make([]float64, len(iq))
+		for i := 0; i < len(iq); i++ {
+			raw := iq[i]
+			r := real(raw)
+			im := imag(raw)
+			d.iqDCI = d.iqDCI*0.999 + r*0.001
+			d.iqDCQ = d.iqDCQ*0.999 + im*0.001
+			cleanIQ := complex(r-d.iqDCI, im-d.iqDCQ)
+
+			diff := cleanIQ * cmplx.Conj(d.prevSample)
+			rawPhase := cmplx.Phase(diff) / math.Pi
+			d.prevSample = cleanIQ
+
+			acPhase := rawPhase - d.dcState
+			d.dcState = d.dcState*0.995 + rawPhase*0.005
+
+			if acPhase > 1.0 {
+				acPhase = 1.0
+			}
+			if acPhase < -1.0 {
+				acPhase = -1.0
+			}
+			audio[i] = acPhase
+		}
+		return audio
+	}
+
+	// Two-Stage Decimation Architecture:
+	// Stage 1: Filter and decimate 2.08 MHz complex IQ down to intermediate ~104 kHz rate (iqDec = 20)
+	// Stage 2: FM phase demodulation at 104 kHz rate (prevents phase-wrapping for ±17 kHz WFM deviation)
+	// Stage 3: Decimate audio PCM from 104 kHz down to target 20.8 kHz rate (audioDec = 5)
+	intermediateRate := 104000
+	iqDec := d.sampleRate / intermediateRate
+	if iqDec < 1 {
+		iqDec = 1
+	}
+	actualIQRate := d.sampleRate / iqDec
+	audioDec := actualIQRate / d.targetRate
+	if audioDec < 1 {
+		audioDec = 1
+	}
+
+	// IQ LPF alpha for ~40 kHz cutoff at raw sample rate
+	alpha := math.Exp(-2.0 * math.Pi * 40000.0 / float64(d.sampleRate))
+	oneMinusAlpha := 1.0 - alpha
+
+	// Scale factor mapping ±17 kHz WFM peak deviation at actualIQRate to ±1.0 audio PCM full scale
+	scaleFactor := float64(actualIQRate) / (2.0 * 17000.0)
+
+	audio := make([]float64, 0, len(iq)/(iqDec*audioDec))
+
+	i := 0
+	for i+iqDec*audioDec <= len(iq) {
+		var sumAudio float64
+		for a := 0; a < audioDec; a++ {
+			for j := 0; j < iqDec; j++ {
+				raw := iq[i]
+				i++
+
+				// 1. IQ DC Offset Cancellation (High-pass filter at 0 Hz)
+				r := real(raw)
+				im := imag(raw)
+				d.iqDCI = d.iqDCI*0.999 + r*0.001
+				d.iqDCQ = d.iqDCQ*0.999 + im*0.001
+				cleanIQ := complex(r-d.iqDCI, im-d.iqDCQ)
+
+				// 2. IQ Low-Pass Filter (~40 kHz cutoff)
+				d.iqLPFState = complex(
+					real(d.iqLPFState)*alpha+real(cleanIQ)*oneMinusAlpha,
+					imag(d.iqLPFState)*alpha+imag(cleanIQ)*oneMinusAlpha,
+				)
+			}
+
+			// 3. FM Phase Demodulation at 104 kHz rate
+			diff := d.iqLPFState * cmplx.Conj(d.prevSample)
+			d.prevSample = d.iqLPFState
+			rawPhase := cmplx.Phase(diff) / math.Pi
+
+			sumAudio += rawPhase
+		}
+
+		// 4. Audio Decimation & DC Blocker
+		avgAudio := sumAudio / float64(audioDec)
+		acAudio := avgAudio - d.dcState
+		d.dcState = d.dcState*0.995 + avgAudio*0.005
+
+		val := acAudio * scaleFactor
+		if val > 1.0 {
+			val = 1.0
+		}
+		if val < -1.0 {
+			val = -1.0
+		}
+		audio = append(audio, val)
+	}
+
 	return audio
 }
 
-// CalculatePowerSpectrum computes a 128-point or 256-point FFT power spectrum for waterfall visualization
+// fft implements a Radix-2 Cooley-Tukey Fast Fourier Transform
+func fft(x []complex128) []complex128 {
+	n := len(x)
+	if n <= 1 {
+		return x
+	}
+
+	even := make([]complex128, n/2)
+	odd := make([]complex128, n/2)
+	for i := 0; i < n/2; i++ {
+		even[i] = x[2*i]
+		odd[i] = x[2*i+1]
+	}
+
+	fftEven := fft(even)
+	fftOdd := fft(odd)
+
+	combined := make([]complex128, n)
+	for k := 0; k < n/2; k++ {
+		angle := -2 * math.Pi * float64(k) / float64(n)
+		twiddle := cmplx.Rect(1, angle) * fftOdd[k]
+		combined[k] = fftEven[k] + twiddle
+		combined[k+n/2] = fftEven[k] - twiddle
+	}
+	return combined
+}
+
+// CalculatePowerSpectrum computes an FFT-based power spectrum (with Hann windowing & fftshift) for waterfall visualization
 func CalculatePowerSpectrum(buf []byte, numBins int) []float64 {
-	if len(buf) < numBins*2 {
+	if numBins < 16 {
+		numBins = 128
+	}
+
+	numSamples := len(buf) / 2
+	if numSamples < numBins {
 		return make([]float64, numBins)
 	}
 
-	bins := make([]float64, numBins)
-	step := (len(buf) / 2) / numBins
+	// Calculate DC offset
+	var sumR, sumIm float64
+	for i := 0; i < numSamples; i++ {
+		sumR += (float64(buf[2*i]) - 127.5) / 127.5
+		sumIm += (float64(buf[2*i+1]) - 127.5) / 127.5
+	}
+	meanR := sumR / float64(numSamples)
+	meanIm := sumIm / float64(numSamples)
 
+	// Average FFT over available blocks to smooth spectrum
+	blocks := numSamples / numBins
+	if blocks > 8 {
+		blocks = 8
+	}
+
+	avgPower := make([]float64, numBins)
+
+	for b := 0; b < blocks; b++ {
+		fftInput := make([]complex128, numBins)
+		for i := 0; i < numBins; i++ {
+			idx := b*numBins + i
+			r := (float64(buf[2*idx]) - 127.5) / 127.5 - meanR
+			im := (float64(buf[2*idx+1]) - 127.5) / 127.5 - meanIm
+
+			// Apply Hann Window
+			w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(numBins-1)))
+			fftInput[i] = complex(r*w, im*w)
+		}
+
+		fftOut := fft(fftInput)
+
+		// Shift zero-frequency component to center of spectrum (fftshift)
+		half := numBins / 2
+		for i := 0; i < numBins; i++ {
+			shiftedIdx := (i + half) % numBins
+			p := cmplx.Abs(fftOut[shiftedIdx])
+			pDb := 10 * math.Log10(p*p + 1e-12)
+			avgPower[i] += pDb
+		}
+	}
+
+	bins := make([]float64, numBins)
 	for i := 0; i < numBins; i++ {
-		idx := i * step
-		r := (float64(buf[2*idx]) - 127.5) / 127.5
-		im := (float64(buf[2*idx+1]) - 127.5) / 127.5
-		power := 10 * math.Log10(r*r+im*im+1e-12)
-		// Normalize to 0.0 - 1.0 range
-		bins[i] = math.Max(0, math.Min(1.0, (power+40.0)/40.0))
+		pDb := avgPower[i] / float64(blocks)
+		// Normalize FFT dBFS power to 0.0 - 1.0 range for waterfall color map
+		bins[i] = math.Max(0, math.Min(1.0, (pDb+40.0)/35.0))
 	}
 
 	return bins
+}
+
+// CalculateRSSI computes the Root Mean Square (RMS) signal power in dBFS from interleaved IQ bytes
+func CalculateRSSI(buf []byte) float64 {
+	if len(buf) < 2 {
+		return -100.0
+	}
+	numSamples := len(buf) / 2
+	var sumR, sumIm float64
+	for i := 0; i < numSamples; i++ {
+		sumR += (float64(buf[2*i]) - 127.5) / 127.5
+		sumIm += (float64(buf[2*i+1]) - 127.5) / 127.5
+	}
+	meanR := sumR / float64(numSamples)
+	meanIm := sumIm / float64(numSamples)
+
+	var sumPower float64
+	for i := 0; i < numSamples; i++ {
+		r := (float64(buf[2*i]) - 127.5) / 127.5 - meanR
+		im := (float64(buf[2*i+1]) - 127.5) / 127.5 - meanIm
+		sumPower += r*r + im*im
+	}
+	avgPower := sumPower / float64(numSamples)
+	if avgPower <= 1e-12 {
+		return -100.0
+	}
+	return 10 * math.Log10(avgPower)
+}
+
+// CalculateSignalAndNoise computes Signal Level (dBFS), Noise Floor (dBFS), and SNR (dB) using FFT bins
+func CalculateSignalAndNoise(buf []byte) (signal float64, noise float64, snr float64) {
+	numBins := 128
+	numSamples := len(buf) / 2
+	if numSamples < numBins {
+		return -100.0, -100.0, 0.0
+	}
+
+	var sumR, sumIm float64
+	for i := 0; i < numSamples; i++ {
+		sumR += (float64(buf[2*i]) - 127.5) / 127.5
+		sumIm += (float64(buf[2*i+1]) - 127.5) / 127.5
+	}
+	meanR := sumR / float64(numSamples)
+	meanIm := sumIm / float64(numSamples)
+
+	fftInput := make([]complex128, numBins)
+	for i := 0; i < numBins; i++ {
+		r := (float64(buf[2*i]) - 127.5) / 127.5 - meanR
+		im := (float64(buf[2*i+1]) - 127.5) / 127.5 - meanIm
+		w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(numBins-1)))
+		fftInput[i] = complex(r*w, im*w)
+	}
+	fftOut := fft(fftInput)
+
+	bins := make([]float64, numBins)
+	half := numBins / 2
+	for i := 0; i < numBins; i++ {
+		shiftedIdx := (i + half) % numBins
+		p := cmplx.Abs(fftOut[shiftedIdx])
+		bins[i] = 10 * math.Log10(p*p + 1e-12)
+	}
+
+	// Center signal band (around DC): bins 61..67 (center in fftshift)
+	var signalSum float64
+	sigCount := 0
+	for i := 61; i <= 67; i++ {
+		signalSum += math.Pow(10, bins[i]/10.0)
+		sigCount++
+	}
+	sigPowerLin := signalSum / float64(sigCount)
+
+	// Out-of-band Noise band: bins 10..40 and 88..118
+	var noiseSum float64
+	noiseCount := 0
+	for i := 10; i <= 40; i++ {
+		noiseSum += math.Pow(10, bins[i]/10.0)
+		noiseCount++
+	}
+	for i := 88; i <= 118; i++ {
+		noiseSum += math.Pow(10, bins[i]/10.0)
+		noiseCount++
+	}
+	noisePowerLin := noiseSum / float64(noiseCount)
+
+	signal = 10 * math.Log10(sigPowerLin + 1e-12)
+	noise = 10 * math.Log10(noisePowerLin + 1e-12)
+	snr = signal - noise
+	if snr < 0 {
+		snr = 0
+	}
+	return signal, noise, snr
+}
+
+
+// ConvertFloatToINT16 converts float64 PCM samples (-1.0 to 1.0) to int16 PCM samples (-32768 to 32767)
+func ConvertFloatToINT16(samples []float64) []int16 {
+	out := make([]int16, len(samples))
+	for i, v := range samples {
+		val := v * 32767.0
+		if val > 32767.0 {
+			val = 32767.0
+		}
+		if val < -32768.0 {
+			val = -32768.0
+		}
+		out[i] = int16(val)
+	}
+	return out
 }
 
 // SaveWAV writes int16 audio samples to a WAV file with standard headers

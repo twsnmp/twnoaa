@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"twnoaa/pkg/datastore"
 	"twnoaa/pkg/decoder"
 	"twnoaa/pkg/dsp"
+	"twnoaa/pkg/logger"
 	"twnoaa/pkg/sdr"
 	"twnoaa/pkg/tracker"
 
@@ -31,7 +33,12 @@ type App struct {
 }
 
 func NewApp() *App {
-	st, _ := datastore.NewStore()
+	_ = logger.Init("")
+	st, err := datastore.NewStore()
+	if err != nil {
+		logger.Errorf("APP", "Failed to open datastore: %v", err)
+	}
+
 	tr := tracker.NewTracker()
 	sd := sdr.NewSDR()
 
@@ -45,9 +52,16 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	logger.Infof("APP", "twnoaa application started")
+
 	// Pre-fetch TLEs
 	go func() {
-		_ = a.tracker.FetchTLEs()
+		err := a.tracker.FetchTLEs()
+		if err != nil {
+			logger.Warnf("TRACKER", "TLE fetch note: %v", err)
+		} else {
+			logger.Infof("TRACKER", "Satellite TLE data updated successfully")
+		}
 	}()
 
 	// Start Auto-recording scheduler loop
@@ -55,19 +69,23 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	logger.Infof("APP", "Application shutting down")
 	a.sdrService.StopStream()
 	if a.store != nil {
 		_ = a.store.Close()
 	}
+	logger.Close()
 }
 
 func (a *App) startAutoRecordScheduler() {
+	logger.Infof("SCHEDULER", "Auto-record scheduler loop started (interval=10s)")
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-a.ctx.Done():
+			logger.Infof("SCHEDULER", "Auto-record scheduler stopped")
 			return
 		case <-ticker.C:
 			cfg := a.store.GetConfig()
@@ -85,6 +103,7 @@ func (a *App) startAutoRecordScheduler() {
 
 			states, err := a.tracker.GetCurrentStates(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt)
 			if err != nil {
+				logger.Errorf("SCHEDULER", "Failed to get satellite states: %v", err)
 				continue
 			}
 
@@ -105,6 +124,7 @@ func (a *App) startAutoRecordScheduler() {
 						if duration <= 0 {
 							duration = 30
 						}
+						logger.Infof("SCHEDULER", "Active pass detected! Sat: %s (Freq: %.4fMHz, Elev: %.1f°, Az: %.1f°). Starting auto-recording for %ds", sat.Name, float64(sat.Frequency)/1e6, sat.Elevation, sat.Azimuth, duration)
 						if a.ctx != nil {
 							runtime.EventsEmit(a.ctx, "auto_record_started", map[string]interface{}{
 								"sat_name":  sat.Name,
@@ -114,6 +134,8 @@ func (a *App) startAutoRecordScheduler() {
 						}
 						a.StartRecordingAndDecode(sat.Name, sat.Frequency, duration)
 						break
+					} else {
+						logger.Debugf("SCHEDULER", "Pass already recorded for key %s, skipping", passKey)
 					}
 				}
 			}
@@ -174,13 +196,26 @@ func (a *App) StartSDR(freq, sampleRate, gain int, autoGain, forceSim bool) stri
 		return fmt.Sprintf("Failed to start SDR: %v", err)
 	}
 
-	// Stream waterfall data to frontend
+	// Stream waterfall data to frontend with throttling and skipping during recording
 	go func() {
 		sub := a.sdrService.Subscribe()
 		defer a.sdrService.Unsubscribe(sub)
 
+		lastEmitTime := time.Now()
+		const spectrumInterval = 100 * time.Millisecond // Limit spectrum updates to max 10 FPS
+
 		for buf := range sub {
-			if a.ctx != nil {
+			// Skip spectrum calculation and emitting while recording (auto or manual)
+			a.recMu.Lock()
+			isRec := a.recording
+			a.recMu.Unlock()
+
+			if isRec {
+				continue
+			}
+
+			if a.ctx != nil && time.Since(lastEmitTime) >= spectrumInterval {
+				lastEmitTime = time.Now()
 				spectrum := dsp.CalculatePowerSpectrum(buf, 128)
 				runtime.EventsEmit(a.ctx, "sdr_spectrum", spectrum)
 			}
@@ -188,6 +223,14 @@ func (a *App) StartSDR(freq, sampleRate, gain int, autoGain, forceSim bool) stri
 	}()
 
 	return "SDR stream started"
+}
+
+func (a *App) SetSDRGain(gain int, autoGain bool) string {
+	err := a.sdrService.SetGain(gain, autoGain)
+	if err != nil {
+		return fmt.Sprintf("Failed to set SDR gain: %v", err)
+	}
+	return "SDR gain updated"
 }
 
 func (a *App) StopSDR() string {
@@ -200,6 +243,7 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 	a.recMu.Lock()
 	if a.recording {
 		a.recMu.Unlock()
+		logger.Warnf("RECORDING", "Recording request ignored: recording already in progress")
 		return "Recording is already in progress"
 	}
 	a.recording = true
@@ -223,6 +267,18 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 		dspEngine := dsp.NewDSP(cfg.SampleRate, 20800)
 		var pcmSamples []float64
 
+		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%.1fdB", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, float64(cfg.TunerGain)/10.0)
+
+		var totalRssi float64
+		var rssiCount int
+		peakRssi := -100.0
+		minRssi := 0.0
+
+		var signalHistory []datastore.SignalPoint
+		lastSampleTime := time.Now()
+
+		startTime := time.Now()
+		lastLogTime := time.Now()
 		timeout := time.After(time.Duration(durationSec) * time.Second)
 
 		for {
@@ -233,6 +289,35 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 				if !ok {
 					goto DONE
 				}
+				rssi := dsp.CalculateRSSI(buf)
+				totalRssi += rssi
+				rssiCount++
+				if rssi > peakRssi {
+					peakRssi = rssi
+				}
+				if minRssi == 0.0 || rssi < minRssi {
+					minRssi = rssi
+				}
+
+				// Sample signal and noise every 0.5 seconds
+				if time.Since(lastSampleTime) >= 500*time.Millisecond {
+					lastSampleTime = time.Now()
+					sig, noise, snr := dsp.CalculateSignalAndNoise(buf)
+					elapsedSec := time.Since(startTime).Seconds()
+					signalHistory = append(signalHistory, datastore.SignalPoint{
+						TimeSec: math.Round(elapsedSec*10) / 10,
+						Signal:  math.Round(sig*10) / 10,
+						Noise:   math.Round(noise*10) / 10,
+						SNR:     math.Round(snr*10) / 10,
+					})
+				}
+
+				if time.Since(lastLogTime) >= 60*time.Second {
+					elapsed := int(time.Since(startTime).Seconds())
+					logger.Infof("RECORDING", "[%s] Progress: %ds / %ds | Current RSSI: %.1f dBFS | Peak RSSI: %.1f dBFS", satName, elapsed, durationSec, rssi, peakRssi)
+					lastLogTime = time.Now()
+				}
+
 				iqComplex := dsp.ConvertIQToComplex(buf)
 				audio := dspEngine.DemodulateFM(iqComplex)
 				pcmSamples = append(pcmSamples, audio...)
@@ -240,30 +325,62 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 		}
 
 	DONE:
+		a.sdrService.Unsubscribe(sub)
+		a.recMu.Lock()
+		a.recording = false
+		a.recMu.Unlock()
+
+		avgRssi := -100.0
+		if rssiCount > 0 {
+			avgRssi = totalRssi / float64(rssiCount)
+		}
+		logger.Infof("RECORDING", "Recording finished for %s: duration=%.1fs, pcm_samples=%d, avg_rssi=%.1f dBFS, peak_rssi=%.1f dBFS, min_rssi=%.1f dBFS, signal_samples=%d", satName, time.Since(startTime).Seconds(), len(pcmSamples), avgRssi, peakRssi, minRssi, len(signalHistory))
+
 		baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
 		res, err := decoder.DecodeAPT(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
 		if err != nil {
+			logger.Errorf("RECORDING", "Decode failed for %s: %v", satName, err)
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "decode_error", err.Error())
 			}
 			return
 		}
 
+		// Save intermediate demodulated audio WAV file
+		audioDir := cfg.DataDir + "/audio"
+		_ = os.MkdirAll(audioDir, 0755)
+		wavPath := fmt.Sprintf("%s/%s_audio.wav", audioDir, baseName)
+		int16Audio := dsp.ConvertFloatToINT16(pcmSamples)
+		if err := dsp.SaveWAV(wavPath, 20800, int16Audio); err != nil {
+			logger.Warnf("RECORDING", "Failed to save intermediate audio WAV file: %v", err)
+			wavPath = ""
+		} else {
+			logger.Infof("RECORDING", "Intermediate audio WAV saved successfully: %s", wavPath)
+		}
+
+		maxElev, maxElevAz := a.getSatMaxElevationInfo(satName, cfg, startTime)
+
 		// Create record
 		record := &datastore.PassRecord{
-			ID:           baseName,
-			SatName:      satName,
-			Frequency:    freq,
-			Timestamp:    time.Now(),
-			ObserverLat:  cfg.ObserverLat,
-			ObserverLon:  cfg.ObserverLon,
-			MaxElevation: 45.0,
-			ImagePath:    res.FullImagePath,
-			ChannelA:     res.ChanAPath,
-			ChannelB:     res.ChanBPath,
+			ID:             baseName,
+			SatName:        satName,
+			Frequency:      freq,
+			Timestamp:      time.Now(),
+			ObserverLat:    cfg.ObserverLat,
+			ObserverLon:    cfg.ObserverLon,
+			MaxElevation:   maxElev,
+			MaxElevationAz: maxElevAz,
+			AvgRSSI:        avgRssi,
+			PeakRSSI:       peakRssi,
+			ImagePath:      res.FullImagePath,
+			ChannelA:       res.ChanAPath,
+			ChannelB:       res.ChanBPath,
+			AudioPath:      wavPath,
+			SignalHistory:  signalHistory,
 		}
 
 		_ = a.store.AddRecord(record)
+		logger.Infof("RECORDING", "Pass record saved successfully: ID=%s, MaxElev=%.1f°, MaxElevAz=%.1f°, Image=%s", record.ID, record.MaxElevation, record.MaxElevationAz, record.ImagePath)
 
 		if a.ctx != nil {
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
@@ -271,11 +388,33 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 
 		// Auto AI analysis if enabled
 		if cfg.AutoAnalyze {
+			logger.Infof("RECORDING", "Triggering auto AI analysis for record %s", record.ID)
 			a.RunAIAnalysis(record.ID, "ja")
 		}
 	}()
 
 	return fmt.Sprintf("Started recording for %d seconds...", durationSec)
+}
+
+func (a *App) getSatMaxElevationInfo(satName string, cfg datastore.Config, recStartTime time.Time) (float64, float64) {
+	// Search in a window from 20 minutes before recStartTime to 40 minutes after
+	passes, err := a.tracker.GetPassesInWindow(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt, recStartTime.Add(-20*time.Minute), recStartTime.Add(40*time.Minute))
+	if err == nil {
+		for _, p := range passes {
+			if p.SatName == satName {
+				return p.MaxElev, p.MaxElevAz
+			}
+		}
+	}
+	states, err := a.tracker.GetCurrentStates(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt)
+	if err == nil {
+		for _, s := range states {
+			if s.Name == satName && s.Elevation > 0 {
+				return s.Elevation, s.Azimuth
+			}
+		}
+	}
+	return 0.0, 0.0
 }
 
 func (a *App) GetPassRecords() []*datastore.PassRecord {
@@ -310,15 +449,16 @@ func (a *App) RunAIAnalysis(recordID string, lang string) string {
 
 	cfg := a.store.GetConfig()
 	req := ai.AnalysisRequest{
-		SatelliteName: target.SatName,
-		FrequencyMHz:  float64(target.Frequency) / 1e6,
-		TimestampStr:  target.Timestamp.Format("2006-01-02 15:04:05 (JST)"),
-		ObserverCity:  cfg.ObserverCity,
-		ObserverLat:   target.ObserverLat,
-		ObserverLon:   target.ObserverLon,
-		MaxElevation:  target.MaxElevation,
-		ImagePath:     filepath.Clean(target.ImagePath),
-		Lang:          lang,
+		SatelliteName:  target.SatName,
+		FrequencyMHz:   float64(target.Frequency) / 1e6,
+		TimestampStr:   target.Timestamp.Format("2006-01-02 15:04:05 (JST)"),
+		ObserverCity:   cfg.ObserverCity,
+		ObserverLat:    target.ObserverLat,
+		ObserverLon:    target.ObserverLon,
+		MaxElevation:   target.MaxElevation,
+		MaxElevationAz: target.MaxElevationAz,
+		ImagePath:      filepath.Clean(target.ImagePath),
+		Lang:           lang,
 	}
 
 	go func() {
@@ -365,6 +505,9 @@ func (a *App) DeletePassRecord(recordID string) string {
 			}
 			if r.ChannelB != "" {
 				_ = os.Remove(r.ChannelB)
+			}
+			if r.AudioPath != "" {
+				_ = os.Remove(r.AudioPath)
 			}
 			break
 		}

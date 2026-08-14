@@ -6,6 +6,7 @@
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
+  "wailsdevserver": "127.0.0.1:34125",
   "author": {
     "name": "twsnmp",
     "email": "ymi@twise.co.jp"

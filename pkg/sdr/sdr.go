@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"twnoaa/pkg/logger"
+
 	rtl "github.com/jpoirier/gortlsdr"
 )
 
@@ -59,7 +61,7 @@ func GetDeviceInfo() DeviceInfo {
 func (s *SDR) Subscribe() chan []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := make(chan []byte, 16)
+	ch := make(chan []byte, 512)
 	s.dataSubscribers = append(s.dataSubscribers, ch)
 	return ch
 }
@@ -92,10 +94,12 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) e
 	devCount := rtl.GetDeviceCount()
 	if devCount == 0 || forceSim {
 		s.simulationMode = true
+		logger.Warnf("SDR", "Starting stream in SIMULATION mode (devCount=%d, forceSim=%v, freq=%.4fMHz)", devCount, forceSim, float64(freq)/1e6)
 	} else {
 		dev, err := rtl.Open(0)
 		if err != nil {
 			s.simulationMode = true
+			logger.Errorf("SDR", "Failed to open RTL-SDR device #0: %v. Falling back to SIMULATION mode.", err)
 		} else {
 			s.device = dev
 			s.simulationMode = false
@@ -105,7 +109,9 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) e
 			if !autoGain {
 				dev.SetTunerGain(gain)
 			}
+			_ = dev.SetOffsetTuning(true)
 			dev.ResetBuffer()
+			logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, offset_tuning=true", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain)
 		}
 	}
 
@@ -118,6 +124,23 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) e
 		go s.runHardwareLoop()
 	}
 
+	return nil
+}
+
+func (s *SDR) SetGain(gain int, autoGain bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.gain = gain
+	s.autoGain = autoGain
+
+	if s.device != nil && s.isStreaming && !s.simulationMode {
+		_ = s.device.SetTunerGainMode(!autoGain)
+		if !autoGain {
+			_ = s.device.SetTunerGain(gain)
+		}
+		logger.Infof("SDR", "Tuner gain updated dynamically: gain=%.1fdB, auto=%v", float64(gain)/10.0, autoGain)
+	}
 	return nil
 }
 
@@ -134,6 +157,7 @@ func (s *SDR) StopStream() {
 		s.device = nil
 	}
 	s.mu.Unlock()
+	logger.Infof("SDR", "SDR stream stopped")
 }
 
 func (s *SDR) IsStreaming() bool {
@@ -188,6 +212,20 @@ func (s *SDR) runSimulationLoop() {
 		case <-s.stopChan:
 			return
 		case <-ticker.C:
+			s.mu.Lock()
+			currentGain := s.gain
+			currentAutoGain := s.autoGain
+			s.mu.Unlock()
+
+			// Scale signal and noise by gain factor (1.0 at 40.0 dB / 400)
+			gainScale := 1.0
+			if !currentAutoGain {
+				gainScale = float64(currentGain) / 400.0
+				if gainScale < 0.05 {
+					gainScale = 0.05
+				}
+			}
+
 			// Synthesize simulated APT IQ signal with noise and subcarrier
 			for i := 0; i < bufSize/2; i++ {
 				// 0.5 sec line pulse simulation (APT sync frame emulation)
@@ -199,19 +237,26 @@ func (s *SDR) runSimulationLoop() {
 					syncPulse = 0.9 // Sync B high pulse
 				}
 
-				// AM subcarrier 2400Hz modulation
-				sub := (1.0 + syncPulse*math.Sin(2*math.Pi*subcarrierFreq*t)) * 0.4
-				noiseI := (rand.Float64() - 0.5) * 0.1
-				noiseQ := (rand.Float64() - 0.5) * 0.1
+				// AM subcarrier 2400Hz audio signal m(t)
+				sub := (0.2 + 0.8*syncPulse*math.Sin(2*math.Pi*subcarrierFreq*t))
 
-				valI := sub*math.Cos(phase) + noiseI
-				valQ := sub*math.Sin(phase) + noiseQ
+				// WFM modulation: instantaneous frequency deviation is proportional to subcarrier audio
+				maxDev := 17000.0 // +/- 17 kHz WFM deviation for NOAA APT
+				phase += 2.0 * math.Pi * (maxDev * sub) / float64(s.sampleRate)
+				if phase > 2.0*math.Pi {
+					phase -= 2.0 * math.Pi
+				}
+
+				noiseI := (rand.Float64() - 0.5) * 0.08 * gainScale
+				noiseQ := (rand.Float64() - 0.5) * 0.08 * gainScale
+
+				valI := (math.Cos(phase) * gainScale) + noiseI
+				valQ := (math.Sin(phase) * gainScale) + noiseQ
 
 				buf[2*i] = byte(math.Max(0, math.Min(255, (valI+1.0)*127.5)))
 				buf[2*i+1] = byte(math.Max(0, math.Min(255, (valQ+1.0)*127.5)))
 
 				t += 1.0 / float64(s.sampleRate)
-				phase += 2 * math.Pi * 15000.0 / float64(s.sampleRate)
 			}
 
 			chunk := make([]byte, bufSize)
@@ -228,7 +273,7 @@ func (s *SDR) broadcast(buf []byte) {
 		select {
 		case sub <- buf:
 		default:
-			// Drop buffer if subscriber channel is full
+			logger.Warnf("SDR", "Subscriber queue full! Dropped %d bytes of IQ data", len(buf))
 		}
 	}
 }

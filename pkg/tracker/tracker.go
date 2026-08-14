@@ -201,12 +201,17 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 }
 
 func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) ([]*PassDetail, error) {
+	now := time.Now().UTC()
+	return t.GetPassesInWindow(obsLat, obsLon, obsAlt, now, now.Add(time.Duration(hours)*time.Hour))
+}
+
+func (t *Tracker) GetPassesInWindow(obsLat, obsLon, obsAlt float64, startTime, endTime time.Time) ([]*PassDetail, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	obs := NewObserver(obsLat, obsLon, obsAlt)
-	startTime := time.Now().UTC()
-	endTime := startTime.Add(time.Duration(hours) * time.Hour)
+	startTime = startTime.UTC()
+	endTime = endTime.UTC()
 
 	passes := make([]*PassDetail, 0)
 	step := 30 * time.Second

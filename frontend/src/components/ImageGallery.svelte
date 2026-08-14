@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image as ImageIcon, Bot, Sparkles, Trash2, AlertTriangle, X } from '@lucide/svelte'
+  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity } from '@lucide/svelte'
+  import SignalChart from './SignalChart.svelte'
 
   let { onRunAI = () => {} } = $props()
 
@@ -12,6 +13,63 @@
   let recordToDelete = $state(null)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
+  let detailViewTab = $state('image') // 'image' | 'signal'
+
+  function getSignalStatus(rec) {
+    if (!rec || rec.avg_rssi === undefined || rec.avg_rssi === 0 || rec.avg_rssi === -100) {
+      return {
+        level: 'unknown',
+        label: i18n.t('gallery.signalUnknown'),
+        badgeClass: 'bg-slate-800/80 text-slate-400 border-slate-700/60',
+        bars: 0,
+        barBg: 'bg-slate-600',
+        rssiText: 'N/A'
+      }
+    }
+    const rssi = rec.avg_rssi
+    const peak = rec.peak_rssi
+    const rssiText = peak ? `${rssi.toFixed(1)} dBFS (Peak ${peak.toFixed(1)})` : `${rssi.toFixed(1)} dBFS`
+
+    if (rssi >= -25) {
+      return {
+        level: 'excellent',
+        label: i18n.t('gallery.signalExcellent'),
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+        bars: 4,
+        barBg: 'bg-emerald-400',
+        rssiText
+      }
+    } else if (rssi >= -35) {
+      return {
+        level: 'good',
+        label: i18n.t('gallery.signalGood'),
+        badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+        bars: 3,
+        barBg: 'bg-cyan-400',
+        rssiText
+      }
+    } else if (rssi >= -45) {
+      return {
+        level: 'fair',
+        label: i18n.t('gallery.signalFair'),
+        badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        bars: 2,
+        barBg: 'bg-amber-400',
+        rssiText
+      }
+    } else {
+      return {
+        level: 'weak',
+        label: i18n.t('gallery.signalWeak'),
+        badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+        bars: 1,
+        barBg: 'bg-rose-400',
+        rssiText
+      }
+    }
+  }
+
+  let selectedSignal = $derived(getSignalStatus(selectedRecord))
 
   async function loadRecords() {
     if (window.go?.main?.App) {
@@ -109,7 +167,7 @@
   <div class="flex items-center justify-between">
     <div>
       <h2 class="text-xl font-bold text-slate-100 flex items-center gap-2">
-        <ImageIcon class="w-5 h-5 text-cyan-400" />
+        <Image class="w-5 h-5 text-cyan-400" />
         {i18n.t('gallery.title')}
       </h2>
       <p class="text-xs text-slate-400 mt-1">{i18n.t('gallery.subtitle')}</p>
@@ -118,7 +176,7 @@
 
   {#if records.length === 0}
     <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
-      <ImageIcon class="w-12 h-12 text-slate-600 mx-auto" />
+      <Image class="w-12 h-12 text-slate-600 mx-auto" />
       <h3 class="text-base font-semibold text-slate-300">{i18n.t('gallery.noImages')}</h3>
       <p class="text-xs text-slate-500 max-w-md mx-auto">
         {i18n.t('gallery.empty')}
@@ -140,11 +198,27 @@
             >
               <div>
                 <span class="text-xs font-bold text-slate-200 block">{rec.sat_name}</span>
-                <span class="text-[10px] text-cyan-400 font-mono block">{(rec.frequency / 1e6).toFixed(4)} MHz</span>
-                <span class="text-[10px] text-slate-500 block">{new Date(rec.timestamp).toLocaleString()}</span>
+                <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
+                  <span class="text-cyan-400 font-mono">{(rec.frequency / 1e6).toFixed(4)} MHz</span>
+                  <span>•</span>
+                  <span>{rec.max_elevation}°{rec.max_elevation_az ? ` (${rec.max_elevation_az}°)` : ''}</span>
+                </div>
+                <span class="text-[10px] text-slate-500 block mt-0.5">{new Date(rec.timestamp).toLocaleString()}</span>
               </div>
 
               <div class="flex items-center gap-1.5">
+                {#if rec.avg_rssi !== undefined && rec.avg_rssi !== 0 && rec.avg_rssi !== -100}
+                  {@const sig = getSignalStatus(rec)}
+                  <span class="px-1.5 py-1 rounded-lg border text-[10px] font-medium flex items-center gap-1 {sig.badgeClass}" title={`RSSI: ${sig.rssiText}`}>
+                    <div class="inline-flex items-end gap-0.5 h-2.5">
+                      <span class="w-0.5 rounded-xs h-[30%] {sig.bars >= 1 ? sig.barBg : 'bg-slate-700/60'}"></span>
+                      <span class="w-0.5 rounded-xs h-[50%] {sig.bars >= 2 ? sig.barBg : 'bg-slate-700/60'}"></span>
+                      <span class="w-0.5 rounded-xs h-[75%] {sig.bars >= 3 ? sig.barBg : 'bg-slate-700/60'}"></span>
+                      <span class="w-0.5 rounded-xs h-[100%] {sig.bars >= 4 ? sig.barBg : 'bg-slate-700/60'}"></span>
+                    </div>
+                  </span>
+                {/if}
+
                 {#if rec.ai_analysis}
                   <span class="p-1.5 bg-emerald-500/20 text-emerald-400 rounded-lg border border-emerald-500/30" title={i18n.t('gallery.aiReady')}>
                     <Sparkles class="w-3.5 h-3.5" />
@@ -173,47 +247,83 @@
                 {selectedRecord.sat_name}
                 <span class="text-xs font-mono text-cyan-400 font-normal">({(selectedRecord.frequency / 1e6).toFixed(4)} MHz)</span>
               </h3>
-              <p class="text-xs text-slate-400">{new Date(selectedRecord.timestamp).toLocaleString()} • {i18n.t('gallery.maxElevLabel')} {selectedRecord.max_elevation}°</p>
+              <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1">
+                <span>{new Date(selectedRecord.timestamp).toLocaleString()}</span>
+                <span>•</span>
+                <span>{i18n.t('gallery.maxElevLabel')} <b class="text-slate-200">{selectedRecord.max_elevation}°{selectedRecord.max_elevation_az ? ` (${selectedRecord.max_elevation_az}°)` : ''}</b></span>
+                <span>•</span>
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border text-[11px] font-medium transition-all {selectedSignal.badgeClass}">
+                  <div class="inline-flex items-end gap-0.5 h-3">
+                    <span class="w-1 rounded-xs h-[30%] {selectedSignal.bars >= 1 ? selectedSignal.barBg : 'bg-slate-700/60'}"></span>
+                    <span class="w-1 rounded-xs h-[50%] {selectedSignal.bars >= 2 ? selectedSignal.barBg : 'bg-slate-700/60'}"></span>
+                    <span class="w-1 rounded-xs h-[75%] {selectedSignal.bars >= 3 ? selectedSignal.barBg : 'bg-slate-700/60'}"></span>
+                    <span class="w-1 rounded-xs h-[100%] {selectedSignal.bars >= 4 ? selectedSignal.barBg : 'bg-slate-700/60'}"></span>
+                  </div>
+                  <span>{i18n.t('gallery.signalLabel')} <b>{selectedSignal.label}</b></span>
+                  {#if selectedSignal.level !== 'unknown'}
+                    <span class="font-mono opacity-80 text-[10px]">({selectedSignal.rssiText})</span>
+                  {/if}
+                </span>
+              </div>
             </div>
 
             <div class="flex items-center gap-3">
               <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
                 <button
-                  onclick={() => viewMode = 'stretch'}
-                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'stretch' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                  title={i18n.t('gallery.stretchY')}
+                  onclick={() => detailViewTab = 'image'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'image' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
                 >
-                  {i18n.t('gallery.stretchY')}
+                  <Image class="w-3.5 h-3.5" />
+                  {i18n.t('gallery.imageTab')}
                 </button>
                 <button
-                  onclick={() => viewMode = 'fit'}
-                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'fit' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                  title={i18n.t('gallery.fitAspect')}
+                  onclick={() => detailViewTab = 'signal'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'signal' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
                 >
-                  {i18n.t('gallery.fitAspect')}
+                  <Activity class="w-3.5 h-3.5" />
+                  {i18n.t('gallery.signalHistoryTab')}
                 </button>
               </div>
 
-              <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                <button
-                  onclick={() => activeChannel = 'full'}
-                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'full' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                >
-                  {i18n.t('gallery.viewFull')}
-                </button>
-                <button
-                  onclick={() => activeChannel = 'chanA'}
-                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanA' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                >
-                  {i18n.t('gallery.viewChanA')}
-                </button>
-                <button
-                  onclick={() => activeChannel = 'chanB'}
-                  class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanB' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                >
-                  {i18n.t('gallery.viewChanB')}
-                </button>
-              </div>
+              {#if detailViewTab === 'image'}
+                <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  <button
+                    onclick={() => viewMode = 'stretch'}
+                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'stretch' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                    title={i18n.t('gallery.stretchY')}
+                  >
+                    {i18n.t('gallery.stretchY')}
+                  </button>
+                  <button
+                    onclick={() => viewMode = 'fit'}
+                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'fit' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                    title={i18n.t('gallery.fitAspect')}
+                  >
+                    {i18n.t('gallery.fitAspect')}
+                  </button>
+                </div>
+
+                <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  <button
+                    onclick={() => activeChannel = 'full'}
+                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'full' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    {i18n.t('gallery.viewFull')}
+                  </button>
+                  <button
+                    onclick={() => activeChannel = 'chanA'}
+                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanA' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    {i18n.t('gallery.viewChanA')}
+                  </button>
+                  <button
+                    onclick={() => activeChannel = 'chanB'}
+                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanB' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  >
+                    {i18n.t('gallery.viewChanB')}
+                  </button>
+                </div>
+              {/if}
 
               <button
                 type="button"
@@ -227,30 +337,36 @@
             </div>
           </div>
 
-          <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[360px] flex items-center justify-center p-4">
-            {#if currentImageBase64}
-              <button
-                type="button"
-                onclick={() => showZoomModal = true}
-                class="w-full flex items-center justify-center group focus:outline-none cursor-zoom-in"
-                title={i18n.t('gallery.clickToZoom')}
-              >
-                <img
-                  src={currentImageBase64}
-                  alt="APT Satellite Capture"
-                  style="image-rendering: pixelated;"
-                  class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full h-[360px] object-fill' : 'max-h-[460px] object-contain'}"
-                />
-              </button>
-            {:else}
-              <div class="text-center py-12 px-6 space-y-3">
-                <AlertTriangle class="w-10 h-10 text-amber-500/80 mx-auto" />
-                <p class="text-xs text-slate-300 font-medium max-w-sm">
-                  {i18n.t('gallery.imageNotFound')}
-                </p>
-              </div>
-            {/if}
-          </div>
+          {#if detailViewTab === 'image'}
+            <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[360px] flex items-center justify-center p-4">
+              {#if currentImageBase64}
+                <button
+                  type="button"
+                  onclick={() => showZoomModal = true}
+                  class="w-full flex items-center justify-center group focus:outline-none cursor-zoom-in"
+                  title={i18n.t('gallery.clickToZoom')}
+                >
+                  <img
+                    src={currentImageBase64}
+                    alt="APT Satellite Capture"
+                    style="image-rendering: pixelated;"
+                    class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full h-[360px] object-fill' : 'max-h-[460px] object-contain'}"
+                  />
+                </button>
+              {:else}
+                <div class="text-center py-12 px-6 space-y-3">
+                  <AlertTriangle class="w-10 h-10 text-amber-500/80 mx-auto" />
+                  <p class="text-xs text-slate-300 font-medium max-w-sm">
+                    {i18n.t('gallery.imageNotFound')}
+                  </p>
+                </div>
+              {/if}
+            </div>
+          {:else}
+            <div class="bg-slate-950/60 rounded-xl border border-slate-800 p-4">
+              <SignalChart signalHistory={selectedRecord.signal_history || []} />
+            </div>
+          {/if}
 
           <div class="flex items-center justify-between pt-2">
             <span class="text-xs text-slate-500 font-mono">{i18n.t('gallery.imageRes')}</span>

@@ -48,19 +48,31 @@ type Config struct {
 	DataDir string `json:"data_dir"`
 }
 
+type SignalPoint struct {
+	TimeSec float64 `json:"time_sec"`
+	Signal  float64 `json:"signal"`
+	Noise   float64 `json:"noise"`
+	SNR     float64 `json:"snr"`
+}
+
 type PassRecord struct {
-	ID           string    `json:"id"`
-	SatName      string    `json:"sat_name"`
-	Frequency    int       `json:"frequency"`
-	Timestamp    time.Time `json:"timestamp"`
-	ObserverLat  float64   `json:"observer_lat"`
-	ObserverLon  float64   `json:"observer_lon"`
-	MaxElevation float64   `json:"max_elevation"`
-	ImagePath    string    `json:"image_path"`
-	ChannelA     string    `json:"channel_a"`
-	ChannelB     string    `json:"channel_b"`
-	AIAnalysis   string    `json:"ai_analysis"`
-	AnalysisDate time.Time `json:"analysis_date"`
+	ID            string        `json:"id"`
+	SatName       string        `json:"sat_name"`
+	Frequency     int           `json:"frequency"`
+	Timestamp     time.Time     `json:"timestamp"`
+	ObserverLat   float64       `json:"observer_lat"`
+	ObserverLon   float64       `json:"observer_lon"`
+	MaxElevation  float64       `json:"max_elevation"`
+	MaxElevationAz float64      `json:"max_elevation_az"`
+	AvgRSSI       float64       `json:"avg_rssi"`
+	PeakRSSI      float64       `json:"peak_rssi"`
+	ImagePath     string        `json:"image_path"`
+	ChannelA      string        `json:"channel_a"`
+	ChannelB      string        `json:"channel_b"`
+	AudioPath     string        `json:"audio_path"`
+	AIAnalysis    string        `json:"ai_analysis"`
+	AnalysisDate  time.Time     `json:"analysis_date"`
+	SignalHistory []SignalPoint `json:"signal_history,omitempty"`
 }
 
 type Store struct {
@@ -155,6 +167,9 @@ func (s *Store) initBuckets(baseDir string) error {
 }
 
 func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != nil {
@@ -164,10 +179,6 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) GetConfig() Config {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var cfg Config
 	defaultCfg := Config{
 		ObserverLat:        36.028,
 		ObserverLon:        139.533,
@@ -179,12 +190,21 @@ func (s *Store) GetConfig() Config {
 		AutoAnalyze:        true,
 		CenterFreq:         137100000,
 		SampleRate:         2080000,
-		TunerGain:          400,
+		TunerGain:          380, // 38.0 dB optimal gain for dipole antenna without external LNA
 		TunerGainAuto:      false,
 		SimulationMode:     true,
 		AutoRecord:         false,
 		AutoRecordDuration: 30,
 	}
+
+	if s == nil || s.conn == nil {
+		return defaultCfg
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var cfg Config
 
 	err := s.conn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketConfig)
@@ -212,6 +232,10 @@ func (s *Store) GetConfig() Config {
 }
 
 func (s *Store) UpdateConfig(cfg Config) error {
+	if s == nil || s.conn == nil {
+		return fmt.Errorf("datastore is not initialized")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -238,6 +262,10 @@ func (s *Store) UpdateConfig(cfg Config) error {
 }
 
 func (s *Store) GetRecords() []*PassRecord {
+	if s == nil || s.conn == nil {
+		return []*PassRecord{}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -269,6 +297,10 @@ func (s *Store) AddRecord(rec *PassRecord) error {
 }
 
 func (s *Store) UpdateRecord(rec *PassRecord) error {
+	if s == nil || s.conn == nil {
+		return fmt.Errorf("datastore is not initialized")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -283,6 +315,10 @@ func (s *Store) UpdateRecord(rec *PassRecord) error {
 }
 
 func (s *Store) DeleteRecord(id string) error {
+	if s == nil || s.conn == nil {
+		return fmt.Errorf("datastore is not initialized")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

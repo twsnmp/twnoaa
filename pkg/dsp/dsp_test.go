@@ -6,23 +6,23 @@ import (
 )
 
 func TestIQToComplexAndDemodulation(t *testing.T) {
-	// Synthesize 8-bit IQ bytes
-	buf := make([]byte, 200)
-	for i := 0; i < 100; i++ {
+	// Synthesize 8-bit IQ bytes with decimation depth (2000 samples = 1000 IQ pairs)
+	buf := make([]byte, 2000)
+	for i := 0; i < 1000; i++ {
 		angle := float64(i) * 0.1
 		buf[2*i] = byte((math.Cos(angle) + 1.0) * 127.5)
 		buf[2*i+1] = byte((math.Sin(angle) + 1.0) * 127.5)
 	}
 
 	complexSamples := ConvertIQToComplex(buf)
-	if len(complexSamples) != 100 {
-		t.Fatalf("Expected 100 complex samples, got %d", len(complexSamples))
+	if len(complexSamples) != 1000 {
+		t.Fatalf("Expected 1000 complex samples, got %d", len(complexSamples))
 	}
 
 	dspEngine := NewDSP(2080000, 20800)
 	audio := dspEngine.DemodulateFM(complexSamples)
-	if len(audio) == 0 {
-		t.Fatalf("Expected non-empty audio array")
+	if len(audio) != 10 {
+		t.Fatalf("Expected 10 audio samples (1000 / 100), got %d", len(audio))
 	}
 
 	spectrum := CalculatePowerSpectrum(buf, 64)
@@ -30,3 +30,77 @@ func TestIQToComplexAndDemodulation(t *testing.T) {
 		t.Fatalf("Expected 64 spectrum bins, got %d", len(spectrum))
 	}
 }
+
+func TestCalculateRSSIWithDCOffset(t *testing.T) {
+	// 1. Constant hardware DC offset with zero AC signal (all bytes = 180)
+	dcBuf := make([]byte, 2000)
+	for i := 0; i < len(dcBuf); i++ {
+		dcBuf[i] = 180
+	}
+
+	rssiDC := CalculateRSSI(dcBuf)
+	if rssiDC > -80.0 {
+		t.Errorf("Expected RSSI for pure DC offset to be <= -80 dBFS, got %.2f dBFS", rssiDC)
+	}
+
+	// 2. AC signal added on top of DC offset
+	acBuf := make([]byte, 2000)
+	for i := 0; i < 1000; i++ {
+		valI := 0.2 * math.Cos(float64(i)*0.2) // AC signal amplitude 0.2
+		valQ := 0.2 * math.Sin(float64(i)*0.2)
+		acBuf[2*i] = byte(math.Max(0, math.Min(255, (valI+0.3+1.0)*127.5))) // +0.3 DC bias
+		acBuf[2*i+1] = byte(math.Max(0, math.Min(255, (valQ+0.3+1.0)*127.5)))
+	}
+
+	rssiAC := CalculateRSSI(acBuf)
+	// Expected AC RMS power: (0.2^2 + 0.2^2)/2 = 0.04 -> 10*log10(0.04) = -13.98 dBFS
+	if rssiAC < -20.0 || rssiAC > -10.0 {
+		t.Errorf("Expected RSSI for AC signal to be around -14 dBFS, got %.2f dBFS", rssiAC)
+	}
+}
+
+func TestDemodulateFMWithDCOffsetAndSubcarrier(t *testing.T) {
+	sampleRate := 2080000
+	targetRate := 20800
+	numSamples := sampleRate / 10 // 0.1 sec = 208,000 samples
+
+	iq := make([]complex128, numSamples)
+	phase := 0.0
+	fSub := 2400.0
+	maxDev := 17000.0
+
+	for i := 0; i < numSamples; i++ {
+		tSec := float64(i) / float64(sampleRate)
+		subcarrier := math.Sin(2.0 * math.Pi * fSub * tSec)
+		instFreq := maxDev * subcarrier
+		phase += 2.0 * math.Pi * instFreq / float64(sampleRate)
+
+		// Strong DC offset +0.4 on I and Q
+		r := math.Cos(phase) + 0.4
+		im := math.Sin(phase) + 0.4
+		iq[i] = complex(r, im)
+	}
+
+	dspEngine := NewDSP(sampleRate, targetRate)
+	audio := dspEngine.DemodulateFM(iq)
+
+	if len(audio) != numSamples/100 {
+		t.Fatalf("Expected %d audio samples, got %d", numSamples/100, len(audio))
+	}
+
+	// Verify audio is non-zero and has non-trivial dynamic range (not locked to 0)
+	var maxVal, minVal float64
+	for _, v := range audio {
+		if v > maxVal {
+			maxVal = v
+		}
+		if v < minVal {
+			minVal = v
+		}
+	}
+
+	if maxVal-minVal < 0.2 {
+		t.Errorf("Demodulated audio range too small (max=%.3f, min=%.3f), FM discriminator may be captured by DC", maxVal, minVal)
+	}
+}
+

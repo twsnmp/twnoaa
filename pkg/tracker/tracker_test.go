@@ -51,7 +51,7 @@ func TestFetchAndCalculateUpcomingPasses(t *testing.T) {
 	elapsed := time.Since(start)
 	t.Logf("Calculated %d passes in %v", len(passes), elapsed)
 	for i, p := range passes {
-		t.Logf("Pass #%d: %s | AOS: %s | LOS: %s | MaxElev: %.1f°",
-			i+1, p.SatName, p.AOS.Format("15:04:05"), p.LOS.Format("15:04:05"), p.MaxElev)
+		t.Logf("Pass #%d: %s | AOS: %s | LOS: %s | MaxElev: %.1f° | Azimuth: %.1f°",
+			i+1, p.SatName, p.AOS.Format("15:04:05"), p.LOS.Format("15:04:05"), p.MaxElev, p.MaxElevAz)
 	}
 }
