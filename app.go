@@ -517,3 +517,94 @@ func (a *App) DeletePassRecord(recordID string) string {
 	}
 	return "Record deleted successfully"
 }
+
+// SelectAndDecodeWAV opens a file dialog to select a WAV file and decode it
+func (a *App) SelectAndDecodeWAV() string {
+	if a.ctx == nil {
+		return "Error: App context not initialized"
+	}
+
+	selectedPath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select NOAA APT WAV Audio File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "WAV Audio (*.wav)",
+				Pattern:     "*.wav",
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Sprintf("Error selecting file: %v", err)
+	}
+
+	if selectedPath == "" {
+		return "No file selected"
+	}
+
+	return a.DecodeWAVFile(selectedPath)
+}
+
+// DecodeWAVFile decodes a specified WAV audio file and creates a PassRecord
+func (a *App) DecodeWAVFile(wavPath string) string {
+	if _, err := os.Stat(wavPath); os.IsNotExist(err) {
+		return fmt.Sprintf("Error: File %s does not exist", wavPath)
+	}
+
+	cfg := a.store.GetConfig()
+	satName := "WAV_Test"
+
+	base := filepath.Base(wavPath)
+	ext := filepath.Ext(base)
+	nameWithoutExt := base[:len(base)-len(ext)]
+	if len(nameWithoutExt) > 0 {
+		satName = fmt.Sprintf("WAV_%s", nameWithoutExt)
+	}
+
+	baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
+	outDir := cfg.DataDir + "/images"
+
+	logger.Infof("APP", "Starting WAV test decode: file=%s, baseName=%s", wavPath, baseName)
+
+	go func() {
+		res, err := decoder.DecodeWAVFile(wavPath, outDir, baseName)
+		if err != nil {
+			logger.Errorf("APP", "WAV decode failed: %v", err)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "decode_error", err.Error())
+			}
+			return
+		}
+
+		record := &datastore.PassRecord{
+			ID:             baseName,
+			SatName:        satName,
+			Frequency:      137100000, // Default NOAA frequency
+			Timestamp:      time.Now(),
+			ObserverLat:    cfg.ObserverLat,
+			ObserverLon:    cfg.ObserverLon,
+			MaxElevation:   90.0,
+			MaxElevationAz: 0.0,
+			AvgRSSI:        0.0,
+			PeakRSSI:       0.0,
+			ImagePath:      res.FullImagePath,
+			ChannelA:       res.ChanAPath,
+			ChannelB:       res.ChanBPath,
+			AudioPath:      wavPath,
+		}
+
+		_ = a.store.AddRecord(record)
+		logger.Infof("APP", "WAV decode completed and record saved: ID=%s, Image=%s", record.ID, record.ImagePath)
+
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "decode_complete", record)
+		}
+
+		if cfg.AutoAnalyze {
+			logger.Infof("APP", "Triggering auto AI analysis for WAV test record %s", record.ID)
+			a.RunAIAnalysis(record.ID, "ja")
+		}
+	}()
+
+	return fmt.Sprintf("WAV decode started for %s...", base)
+}
+

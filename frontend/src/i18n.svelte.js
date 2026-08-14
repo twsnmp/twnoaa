@@ -105,7 +105,9 @@ const translations = {
       noiseLevel: "Noise Floor (dBFS)",
       snr: "SNR (dB)",
       timeOffset: "Elapsed Time",
-      noSignalData: "No signal/noise history data available for this pass."
+      noSignalData: "No signal/noise history data available for this pass.",
+      testDecodeWav: "Decode from WAV File (Test)",
+      decodingWav: "Decoding WAV file..."
     },
     ai: {
       title: "AI Meteorological Image Analysis",
@@ -259,7 +261,9 @@ const translations = {
       noiseLevel: "ノイズレベル (dBFS)",
       snr: "S/N比 (SNR dB)",
       timeOffset: "経過時間",
-      noSignalData: "このパスの信号・ノイズ時系列データは記録されていません。"
+      noSignalData: "このパスの信号・ノイズ時系列データは記録されていません。",
+      testDecodeWav: "WAVファイルからデコード (テスト)",
+      decodingWav: "WAVファイルをデコード中..."
     },
     ai: {
       title: "AI気象解析システム (マルチLLM連携)",

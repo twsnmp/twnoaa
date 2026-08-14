@@ -104,3 +104,43 @@ func TestDemodulateFMWithDCOffsetAndSubcarrier(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadWAV(t *testing.T) {
+	tempFile := t.TempDir() + "/test_roundtrip.wav"
+
+	// Generate 1 second of 440Hz sine wave
+	sampleRate := 20800
+	samples := make([]float64, sampleRate)
+	for i := 0; i < sampleRate; i++ {
+		tSec := float64(i) / float64(sampleRate)
+		samples[i] = 0.8 * math.Sin(2.0*math.Pi*440.0*tSec)
+	}
+
+	int16Samples := ConvertFloatToINT16(samples)
+	if err := SaveWAV(tempFile, sampleRate, int16Samples); err != nil {
+		t.Fatalf("SaveWAV failed: %v", err)
+	}
+
+	loadedSamples, loadedRate, err := LoadWAV(tempFile)
+	if err != nil {
+		t.Fatalf("LoadWAV failed: %v", err)
+	}
+
+	if loadedRate != sampleRate {
+		t.Errorf("Expected sample rate %d, got %d", sampleRate, loadedRate)
+	}
+
+	if len(loadedSamples) != len(samples) {
+		t.Errorf("Expected %d samples, got %d", len(samples), len(loadedSamples))
+	}
+
+	// Compare sample values with small tolerance for 16-bit quantization
+	for i := 0; i < len(samples); i++ {
+		diff := math.Abs(samples[i] - loadedSamples[i])
+		if diff > 0.001 {
+			t.Errorf("Sample mismatch at index %d: original=%.5f, loaded=%.5f (diff=%.5f)", i, samples[i], loadedSamples[i], diff)
+			break
+		}
+	}
+}
+
+

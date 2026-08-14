@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 
+	"twnoaa/pkg/dsp"
 	"twnoaa/pkg/logger"
 )
 
@@ -279,3 +280,15 @@ func savePNG(filename string, lines [][]uint8) error {
 
 	return png.Encode(file, img)
 }
+
+// DecodeWAVFile loads a WAV audio file and decodes it into APT images
+func DecodeWAVFile(wavPath, outDir, baseName string) (*DecodeResult, error) {
+	samples, sampleRate, err := dsp.LoadWAV(wavPath)
+	if err != nil {
+		logger.Errorf("DECODER", "Failed to load WAV file %s: %v", wavPath, err)
+		return nil, fmt.Errorf("failed to load WAV file: %w", err)
+	}
+
+	return DecodeAPT(samples, sampleRate, outDir, baseName)
+}
+

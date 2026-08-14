@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity } from '@lucide/svelte'
+  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload } from '@lucide/svelte'
   import SignalChart from './SignalChart.svelte'
 
   let { onRunAI = () => {} } = $props()
@@ -14,6 +14,30 @@
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
   let detailViewTab = $state('image') // 'image' | 'signal'
+  let decodingWav = $state(false)
+  let wavStatusMsg = $state('')
+
+  async function handleDecodeWAV() {
+    if (window.go?.main?.App?.SelectAndDecodeWAV) {
+      try {
+        decodingWav = true
+        wavStatusMsg = i18n.t('gallery.decodingWav')
+        const msg = await window.go.main.App.SelectAndDecodeWAV()
+        wavStatusMsg = msg
+        setTimeout(() => {
+          decodingWav = false
+          wavStatusMsg = ''
+        }, 4000)
+      } catch (err) {
+        console.error("Failed to decode WAV file:", err)
+        wavStatusMsg = "Error: " + (err.message || err)
+        setTimeout(() => {
+          decodingWav = false
+          wavStatusMsg = ''
+        }, 4000)
+      }
+    }
+  }
 
   function getSignalStatus(rec) {
     if (!rec || rec.avg_rssi === undefined || rec.avg_rssi === 0 || rec.avg_rssi === -100) {
@@ -164,7 +188,7 @@
 </script>
 
 <div class="p-6 space-y-6 overflow-y-auto max-h-[calc(100vh-65px)]">
-  <div class="flex items-center justify-between">
+  <div class="flex items-center justify-between flex-wrap gap-4">
     <div>
       <h2 class="text-xl font-bold text-slate-100 flex items-center gap-2">
         <Image class="w-5 h-5 text-cyan-400" />
@@ -172,15 +196,41 @@
       </h2>
       <p class="text-xs text-slate-400 mt-1">{i18n.t('gallery.subtitle')}</p>
     </div>
+
+    <div class="flex items-center gap-3">
+      {#if wavStatusMsg}
+        <span class="text-xs text-cyan-400 font-medium animate-pulse">{wavStatusMsg}</span>
+      {/if}
+      <button
+        type="button"
+        onclick={handleDecodeWAV}
+        disabled={decodingWav}
+        class="px-3.5 py-2 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+      >
+        <Upload class="w-4 h-4 text-cyan-400" />
+        {i18n.t('gallery.testDecodeWav')}
+      </button>
+    </div>
   </div>
 
   {#if records.length === 0}
-    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
       <Image class="w-12 h-12 text-slate-600 mx-auto" />
       <h3 class="text-base font-semibold text-slate-300">{i18n.t('gallery.noImages')}</h3>
       <p class="text-xs text-slate-500 max-w-md mx-auto">
         {i18n.t('gallery.empty')}
       </p>
+      <div class="pt-2">
+        <button
+          type="button"
+          onclick={handleDecodeWAV}
+          disabled={decodingWav}
+          class="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-all shadow-lg active:scale-95 disabled:opacity-50 cursor-pointer"
+        >
+          <Upload class="w-4 h-4" />
+          {i18n.t('gallery.testDecodeWav')}
+        </button>
+      </div>
     </div>
   {:else}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">

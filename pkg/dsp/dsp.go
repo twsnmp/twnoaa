@@ -2,6 +2,9 @@ package dsp
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"math"
 	"math/cmplx"
 	"os"
@@ -387,3 +390,128 @@ func SaveWAV(filename string, sampleRate int, samples []int16) error {
 
 	return nil
 }
+
+// LoadWAV reads a WAV audio file and converts its PCM samples to float64 (-1.0 to 1.0) along with its sample rate
+func LoadWAV(filename string) ([]float64, int, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer file.Close()
+
+	header := make([]byte, 12)
+	if _, err := io.ReadFull(file, header); err != nil {
+		return nil, 0, fmt.Errorf("invalid WAV header: %w", err)
+	}
+
+	if string(header[0:4]) != "RIFF" || string(header[8:12]) != "WAVE" {
+		return nil, 0, fmt.Errorf("file is not a valid RIFF/WAVE file")
+	}
+
+	var numChannels uint16
+	var sampleRate uint32
+	var bitsPerSample uint16
+	var audioFormat uint16
+	var dataBytes []byte
+
+	// Read chunks
+	for {
+		chunkHeader := make([]byte, 8)
+		if _, err := io.ReadFull(file, chunkHeader); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			return nil, 0, err
+		}
+
+		chunkID := string(chunkHeader[0:4])
+		chunkSize := binary.LittleEndian.Uint32(chunkHeader[4:8])
+
+		if chunkID == "fmt " {
+			fmtBuf := make([]byte, chunkSize)
+			if _, err := io.ReadFull(file, fmtBuf); err != nil {
+				return nil, 0, fmt.Errorf("failed to read fmt chunk: %w", err)
+			}
+			if len(fmtBuf) < 16 {
+				return nil, 0, fmt.Errorf("invalid fmt chunk size")
+			}
+			audioFormat = binary.LittleEndian.Uint16(fmtBuf[0:2])
+			numChannels = binary.LittleEndian.Uint16(fmtBuf[2:4])
+			sampleRate = binary.LittleEndian.Uint32(fmtBuf[4:8])
+			bitsPerSample = binary.LittleEndian.Uint16(fmtBuf[14:16])
+		} else if chunkID == "data" {
+			dataBytes = make([]byte, chunkSize)
+			if _, err := io.ReadFull(file, dataBytes); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, 0, fmt.Errorf("failed to read data chunk: %w", err)
+			}
+			break // Usually data is the main payload
+		} else {
+			// Skip unknown chunks
+			if _, err := file.Seek(int64(chunkSize), io.SeekCurrent); err != nil {
+				return nil, 0, fmt.Errorf("failed to seek chunk %s: %w", chunkID, err)
+			}
+		}
+	}
+
+	if audioFormat != 1 && audioFormat != 3 { // 1 = PCM, 3 = IEEE Float
+		return nil, 0, fmt.Errorf("unsupported WAV audio format %d (only uncompressed PCM/IEEE Float supported)", audioFormat)
+	}
+
+	if len(dataBytes) == 0 {
+		return nil, 0, fmt.Errorf("no audio data found in WAV file")
+	}
+
+	if numChannels == 0 {
+		numChannels = 1
+	}
+
+	bytesPerSample := int(bitsPerSample / 8)
+	if bytesPerSample == 0 {
+		bytesPerSample = 2 // default to 16-bit
+	}
+
+	totalSamples := len(dataBytes) / (bytesPerSample * int(numChannels))
+	samples := make([]float64, totalSamples)
+
+	for i := 0; i < totalSamples; i++ {
+		var sum float64
+		for ch := 0; ch < int(numChannels); ch++ {
+			offset := (i*int(numChannels) + ch) * bytesPerSample
+			if offset+bytesPerSample > len(dataBytes) {
+				break
+			}
+
+			var val float64
+			switch bitsPerSample {
+			case 8:
+				// Unsigned 8-bit PCM (0 to 255) -> -1.0 to 1.0
+				u8 := dataBytes[offset]
+				val = (float64(u8) - 128.0) / 128.0
+			case 16:
+				// Signed 16-bit PCM (-32768 to 32767)
+				s16 := int16(binary.LittleEndian.Uint16(dataBytes[offset : offset+2]))
+				val = float64(s16) / 32768.0
+			case 32:
+				if audioFormat == 3 {
+					// 32-bit IEEE float
+					bits := binary.LittleEndian.Uint32(dataBytes[offset : offset+4])
+					val = float64(math.Float32frombits(bits))
+				} else {
+					// Signed 32-bit PCM
+					s32 := int32(binary.LittleEndian.Uint32(dataBytes[offset : offset+4]))
+					val = float64(s32) / 2147483648.0
+				}
+			default:
+				// Fallback 16bit
+				s16 := int16(binary.LittleEndian.Uint16(dataBytes[offset : offset+2]))
+				val = float64(s16) / 32768.0
+			}
+			sum += val
+		}
+		// Average across channels to mono
+		samples[i] = sum / float64(numChannels)
+	}
+
+	return samples, int(sampleRate), nil
+}
+
