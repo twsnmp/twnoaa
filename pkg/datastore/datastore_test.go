@@ -52,7 +52,7 @@ func TestDatastoreBbolt(t *testing.T) {
 	err = store.conn.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketConfig)
 		data := b.Get(configKey)
-		if data != nil && len(data) > 0 {
+		if len(data) > 0 {
 			if strings.Contains(string(data), "secret_gemini_key_123") {
 				t.Errorf("Plaintext API key was found in raw bbolt database!")
 			}
