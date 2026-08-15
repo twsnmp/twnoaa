@@ -51,7 +51,7 @@
   }
 
   async function handleGainChange() {
-    if (isStreaming && window.go?.main?.App) {
+    if (window.go?.main?.App) {
       try {
         await window.go.main.App.SetSDRGain(Number(tunerGain), autoGain)
       } catch (err) {

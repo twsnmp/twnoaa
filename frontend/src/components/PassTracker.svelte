@@ -7,10 +7,25 @@
 
   let satStates = $state([])
   let upcomingPasses = $state([])
+  let activeUpcomingPasses = $derived(
+    upcomingPasses.filter(p => new Date(p.los).getTime() > Date.now())
+  )
   let isLoading = $state(false)
   let autoRecordEnabled = $state(false)
   let autoRecordBanner = $state('')
   let timer
+  let bannerTimer
+  let pollCount = 0
+
+  function showBanner(msg, autoHideMs = 0) {
+    if (bannerTimer) clearTimeout(bannerTimer)
+    autoRecordBanner = msg
+    if (autoHideMs > 0) {
+      bannerTimer = setTimeout(() => {
+        autoRecordBanner = ''
+      }, autoHideMs)
+    }
+  }
 
   async function loadData() {
     if (window.go?.main?.App) {
@@ -47,11 +62,15 @@
 
   onMount(() => {
     loadData()
-    // Poll satellite states every 3 seconds for live tracking
+    // Poll satellite states every 3 seconds and update pass schedule every 15 seconds
     timer = setInterval(async () => {
       if (window.go?.main?.App) {
         try {
           satStates = await window.go.main.App.GetSatelliteStates()
+          pollCount++
+          if (pollCount % 5 === 0) {
+            upcomingPasses = await window.go.main.App.GetUpcomingPasses(24)
+          }
         } catch (err) {
           console.error("Failed to update satellite states:", err)
         }
@@ -60,13 +79,24 @@
 
     if (window.runtime?.EventsOn) {
       window.runtime.EventsOn('auto_record_started', (data) => {
-        autoRecordBanner = `衛星通過検出: ${data.sat_name} の自動録音・デコード (${data.duration}秒) を開始しました`
+        showBanner(`衛星通過検出: ${data.sat_name} の自動録音・デコード (${data.duration}秒) を開始しました`)
+      })
+
+      window.runtime.EventsOn('auto_record_ended', (data) => {
+        const satName = data?.sat_name || ''
+        showBanner(`${satName ? satName + ': ' : ''}${i18n.t('tracker.autoRecordComplete')}`, 4000)
+        loadData()
+      })
+
+      window.runtime.EventsOn('decode_error', (errMsg) => {
+        showBanner(`${i18n.t('tracker.autoRecordFailed')}: ${errMsg}`, 5000)
       })
     }
   })
 
   onDestroy(() => {
     if (timer) clearInterval(timer)
+    if (bannerTimer) clearTimeout(bannerTimer)
   })
 </script>
 
@@ -188,7 +218,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-800/60 font-mono text-slate-300">
-          {#each upcomingPasses as pass}
+          {#each activeUpcomingPasses as pass}
             <tr class="hover:bg-slate-800/40 transition-colors">
               <td class="py-1.5 px-3.5 font-bold text-slate-100 font-sans">{pass.sat_name}</td>
               <td class="py-1.5 px-3.5 text-cyan-400">{(pass.frequency / 1e6).toFixed(4)} MHz</td>
@@ -211,7 +241,7 @@
             </tr>
           {/each}
 
-          {#if upcomingPasses.length === 0}
+          {#if activeUpcomingPasses.length === 0}
             <tr>
               <td colspan="7" class="py-6 text-center text-slate-500 font-sans">
                 {i18n.t('tracker.noPasses')}

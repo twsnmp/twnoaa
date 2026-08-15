@@ -254,6 +254,11 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 			a.recMu.Lock()
 			a.recording = false
 			a.recMu.Unlock()
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "auto_record_ended", map[string]interface{}{
+					"sat_name": satName,
+				})
+			}
 		}()
 
 		cfg := a.store.GetConfig()

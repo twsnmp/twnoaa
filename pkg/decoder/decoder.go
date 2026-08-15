@@ -40,7 +40,7 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 	}
 
 	// 1. Extract AM envelope
-	envelope := extractEnvelope(samples)
+	envelope := extractEnvelope(samples, sampleRate)
 
 	// 2. Slice into 0.5s line chunks and resample to 2080 px TargetWidth
 	samplesPerLine := int(float64(sampleRate) * 0.5)
@@ -81,9 +81,9 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 		return nil, fmt.Errorf("failed to save full image: %w", err)
 	}
 
-	// 6. Save Channel A (Visible half) and Channel B (IR half)
-	chanALines := extractSubImage(alignedLines, 80, 990)
-	chanBLines := extractSubImage(alignedLines, 1120, 2030)
+	// 6. Save Channel A (Visible half) and Channel B (IR half) according to NOAA APT specs
+	chanALines := extractSubImage(alignedLines, 86, 995)
+	chanBLines := extractSubImage(alignedLines, 1126, 2035)
 
 	chanAPath := fmt.Sprintf("%s/%s_chanA.png", outDir, baseName)
 	chanBPath := fmt.Sprintf("%s/%s_chanB.png", outDir, baseName)
@@ -102,10 +102,13 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 	}, nil
 }
 
-func extractEnvelope(samples []float64) []float64 {
-	sampleRate := 20800.0
+func extractEnvelope(samples []float64, sampleRate int) []float64 {
+	sr := float64(sampleRate)
+	if sr <= 0 {
+		sr = 20800.0
+	}
 	carrierFreq := 2400.0
-	dt := 2.0 * math.Pi * carrierFreq / sampleRate
+	dt := 2.0 * math.Pi * carrierFreq / sr
 
 	env := make([]float64, len(samples))
 	iSamples := make([]float64, len(samples))
@@ -119,7 +122,11 @@ func extractEnvelope(samples []float64) []float64 {
 	}
 
 	// 2. Low-pass filter (moving average) to reject out-of-band audio noise and 4800Hz harmonics
-	window := 10
+	// Window size scaled to sample rate (~1 pixel width at TargetWidth=2080, e.g. 5 samples at 20800 Hz => window=2)
+	window := int(sr / 8320.0)
+	if window < 1 {
+		window = 1
+	}
 	for n := 0; n < len(samples); n++ {
 		sumI := 0.0
 		sumQ := 0.0
@@ -157,7 +164,8 @@ func findGlobalSyncOffset(lines [][]uint8) int {
 
 	// Sync A consists of 7 cycles of 1040 Hz square wave.
 	// At 2080 px per 0.5s line, each 1040 Hz cycle is 4 px wide (2 px HIGH, 2 px LOW).
-	for x := 0; x < TargetWidth; x++ {
+	// Search in the first half of the line (Channel A region) where Sync A is located.
+	for x := 0; x < TargetWidth/2; x++ {
 		diff := 0.0
 		for p := 0; p < 7; p++ {
 			h1 := (x + p*4) % TargetWidth

@@ -41,7 +41,9 @@ const translations = {
       tune: "Tune Receiver",
       noPasses: "No upcoming satellite passes detected in the next 24 hours.",
       autoRecordActive: "Auto Pass Scheduler Active",
-      autoRecordOff: "Auto Pass Scheduler Off"
+      autoRecordOff: "Auto Pass Scheduler Off",
+      autoRecordComplete: "Auto-recording & decoding completed successfully.",
+      autoRecordFailed: "Auto-recording & decoding failed."
     },
     sdr: {
       title: "SDR Signal Receiver & DSP Demodulator",
@@ -197,7 +199,9 @@ const translations = {
       tune: "チューニング",
       noPasses: "直近24時間に通過する気象衛星はありません。",
       autoRecordActive: "自動録音スケジューラー稼働中",
-      autoRecordOff: "自動録音スケジューラーOFF"
+      autoRecordOff: "自動録音スケジューラーOFF",
+      autoRecordComplete: "自動録音・デコードが完了しました",
+      autoRecordFailed: "自動録音・デコードでエラーが発生しました"
     },
     sdr: {
       title: "SDR受信機 & リアルタイムDSP復調器",
