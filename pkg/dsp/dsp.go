@@ -8,20 +8,15 @@ import (
 	"math"
 	"math/cmplx"
 	"os"
+	"sort"
 )
-
-// iqLPFAlpha: IQ low-pass filter coefficient.
-// Cutoff ≈ (1-α)/(2π) × f_IQ ≈ 43 kHz, reducing noise bandwidth from 2.08 MHz to 43 kHz.
-// This reduces FM discriminator phase-diff noise by factor (1-α) ≈ 17.7 dB,
-// bringing CNR from ~6 dB to ~24 dB (above FM threshold of 10-12 dB).
-const iqLPFAlpha = 0.87
 
 type DSP struct {
 	sampleRate int
 	targetRate int
 	decimation int
 	prevSample complex128
-	iqLPFState complex128 // IQ low-pass filter state (noise bandwidth reduction)
+	iqLPFState complex128 // IQ low-pass filter state
 	iqDCI      float64    // Running DC estimate for I channel
 	iqDCQ      float64    // Running DC estimate for Q channel
 	dcState    float64    // Audio DC blocker state
@@ -39,7 +34,7 @@ func NewDSP(sampleRate, targetAudioRate int) *DSP {
 	}
 }
 
-// ConvertIQToComplex converts 8-bit interleaved IQ bytes to complex128 (-1.0 to +1.0)
+// ConvertIQToComplex converts 8-bit interleaved IQ bytes (0 to 255) to complex128 (-1.0 to +1.0)
 func ConvertIQToComplex(buf []byte) []complex128 {
 	samples := make([]complex128, len(buf)/2)
 	for i := 0; i < len(samples); i++ {
@@ -50,44 +45,28 @@ func ConvertIQToComplex(buf []byte) []complex128 {
 	return samples
 }
 
-// DemodulateFM demodulates FM IQ samples into audio PCM float64 (-1.0 to 1.0)
+// ConvertFloatToINT16 converts float64 PCM samples (-1.0 to 1.0) to int16 PCM
+func ConvertFloatToINT16(samples []float64) []int16 {
+	out := make([]int16, len(samples))
+	for i, s := range samples {
+		if s > 1.0 {
+			s = 1.0
+		}
+		if s < -1.0 {
+			s = -1.0
+		}
+		out[i] = int16(s * 32767.0)
+	}
+	return out
+}
+
+// DemodulateFM demodulates FM IQ samples into clean audio PCM float64 (-1.0 to 1.0)
 func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 	if len(iq) == 0 {
 		return nil
 	}
 
-	if d.decimation <= 1 {
-		audio := make([]float64, len(iq))
-		for i := 0; i < len(iq); i++ {
-			raw := iq[i]
-			r := real(raw)
-			im := imag(raw)
-			d.iqDCI = d.iqDCI*0.999 + r*0.001
-			d.iqDCQ = d.iqDCQ*0.999 + im*0.001
-			cleanIQ := complex(r-d.iqDCI, im-d.iqDCQ)
-
-			diff := cleanIQ * cmplx.Conj(d.prevSample)
-			rawPhase := cmplx.Phase(diff) / math.Pi
-			d.prevSample = cleanIQ
-
-			acPhase := rawPhase - d.dcState
-			d.dcState = d.dcState*0.995 + rawPhase*0.005
-
-			if acPhase > 1.0 {
-				acPhase = 1.0
-			}
-			if acPhase < -1.0 {
-				acPhase = -1.0
-			}
-			audio[i] = acPhase
-		}
-		return audio
-	}
-
-	// Two-Stage Decimation Architecture:
-	// Stage 1: Filter and decimate 2.08 MHz complex IQ down to intermediate ~104 kHz rate (iqDec = 20)
-	// Stage 2: FM phase demodulation at 104 kHz rate (prevents phase-wrapping for ±17 kHz WFM deviation)
-	// Stage 3: Decimate audio PCM from 104 kHz down to target 20.8 kHz rate (audioDec = 5)
+	// Target intermediate rate for FM demodulation (~104 kHz)
 	intermediateRate := 104000
 	iqDec := d.sampleRate / intermediateRate
 	if iqDec < 1 {
@@ -99,61 +78,78 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 		audioDec = 1
 	}
 
-	// IQ LPF alpha for ~40 kHz cutoff at raw sample rate
+	// 1. Low-Pass Filter (~40 kHz cutoff) & Decimate raw 2.08 MHz IQ to 104 kHz rate
 	alpha := math.Exp(-2.0 * math.Pi * 40000.0 / float64(d.sampleRate))
 	oneMinusAlpha := 1.0 - alpha
 
-	// Scale factor mapping ±17 kHz WFM peak deviation at actualIQRate to ±1.0 audio PCM full scale
-	scaleFactor := float64(actualIQRate) / (2.0 * 17000.0)
+	decimatedIQ := make([]complex128, 0, len(iq)/iqDec)
+	for i := 0; i < len(iq); i++ {
+		raw := iq[i]
+		r := real(raw)
+		im := imag(raw)
 
-	audio := make([]float64, 0, len(iq)/(iqDec*audioDec))
+		// DC Offset removal
+		d.iqDCI = d.iqDCI*0.999 + r*0.001
+		d.iqDCQ = d.iqDCQ*0.999 + im*0.001
+		cleanIQ := complex(r-d.iqDCI, im-d.iqDCQ)
 
-	i := 0
-	for i+iqDec*audioDec <= len(iq) {
-		var sumAudio float64
-		for a := 0; a < audioDec; a++ {
-			for j := 0; j < iqDec; j++ {
-				raw := iq[i]
-				i++
+		// Low-pass filter (~40 kHz cutoff)
+		d.iqLPFState = complex(
+			real(d.iqLPFState)*alpha+real(cleanIQ)*oneMinusAlpha,
+			imag(d.iqLPFState)*alpha+imag(cleanIQ)*oneMinusAlpha,
+		)
 
-				// 1. IQ DC Offset Cancellation (High-pass filter at 0 Hz)
-				r := real(raw)
-				im := imag(raw)
-				d.iqDCI = d.iqDCI*0.999 + r*0.001
-				d.iqDCQ = d.iqDCQ*0.999 + im*0.001
-				cleanIQ := complex(r-d.iqDCI, im-d.iqDCQ)
-
-				// 2. IQ Low-Pass Filter (~40 kHz cutoff)
-				d.iqLPFState = complex(
-					real(d.iqLPFState)*alpha+real(cleanIQ)*oneMinusAlpha,
-					imag(d.iqLPFState)*alpha+imag(cleanIQ)*oneMinusAlpha,
-				)
-			}
-
-			// 3. FM Phase Demodulation at 104 kHz rate
-			diff := d.iqLPFState * cmplx.Conj(d.prevSample)
-			d.prevSample = d.iqLPFState
-			rawPhase := cmplx.Phase(diff) / math.Pi
-
-			sumAudio += rawPhase
+		if i%iqDec == 0 {
+			decimatedIQ = append(decimatedIQ, d.iqLPFState)
 		}
-
-		// 4. Audio Decimation & DC Blocker
-		avgAudio := sumAudio / float64(audioDec)
-		acAudio := avgAudio - d.dcState
-		d.dcState = d.dcState*0.995 + avgAudio*0.005
-
-		val := acAudio * scaleFactor
-		if val > 1.0 {
-			val = 1.0
-		}
-		if val < -1.0 {
-			val = -1.0
-		}
-		audio = append(audio, val)
 	}
 
-	return audio
+	// 2. FM Quadrature Demodulation at 104 kHz rate
+	scaleFactor := float64(actualIQRate) / (2.0 * math.Pi * 17000.0) // ±17 kHz max deviation to ±1.0 PCM
+	audio104k := make([]float64, len(decimatedIQ))
+
+	for i, sample := range decimatedIQ {
+		if d.prevSample == 0 {
+			d.prevSample = sample
+			audio104k[i] = 0
+			continue
+		}
+
+		i0 := real(d.prevSample)
+		q0 := imag(d.prevSample)
+		i1 := real(sample)
+		q1 := imag(sample)
+
+		// Quadrature atan2(I1*Q0 - Q1*I0, I1*I0 + Q1*Q0)
+		num := i1*q0 - q1*i0
+		den := i1*i0 + q1*q0
+		d.prevSample = sample
+
+		phaseDiff := math.Atan2(num, den) // [-pi, +pi]
+		audio104k[i] = phaseDiff * scaleFactor
+	}
+
+	// 3. Audio Decimation & DC Blocker
+	audioOut := make([]float64, 0, len(audio104k)/audioDec)
+	for i := 0; i+audioDec <= len(audio104k); i += audioDec {
+		var sum float64
+		for k := 0; k < audioDec; k++ {
+			sum += audio104k[i+k]
+		}
+		avg := sum / float64(audioDec)
+		acAudio := avg - d.dcState
+		d.dcState = d.dcState*0.995 + avg*0.005
+
+		if acAudio > 1.0 {
+			acAudio = 1.0
+		}
+		if acAudio < -1.0 {
+			acAudio = -1.0
+		}
+		audioOut = append(audioOut, acAudio)
+	}
+
+	return audioOut
 }
 
 // fft implements a Radix-2 Cooley-Tukey Fast Fourier Transform
@@ -238,11 +234,9 @@ func CalculatePowerSpectrum(buf []byte, numBins int) []float64 {
 	bins := make([]float64, numBins)
 	for i := 0; i < numBins; i++ {
 		pDb := avgPower[i] / float64(blocks)
-		// Normalize FFT dBFS power to 0.0 - 1.0 range for waterfall color map
 		bins[i] = math.Max(0, math.Min(1.0, (pDb+40.0)/35.0))
 	}
 
-	// Remove hardware DC spike artifact at center 0 Hz bin by interpolating adjacent bins
 	centerBin := numBins / 2
 	if centerBin > 0 && centerBin < numBins-1 {
 		bins[centerBin] = (bins[centerBin-1] + bins[centerBin+1]) / 2.0
@@ -251,11 +245,12 @@ func CalculatePowerSpectrum(buf []byte, numBins int) []float64 {
 	return bins
 }
 
-// CalculateRSSI computes the Root Mean Square (RMS) signal power in dBFS from interleaved IQ bytes
+// CalculateRSSI computes the Root Mean Square (RMS) signal level in dBFS
 func CalculateRSSI(buf []byte) float64 {
 	if len(buf) < 2 {
 		return -100.0
 	}
+
 	numSamples := len(buf) / 2
 	var sumR, sumIm float64
 	for i := 0; i < numSamples; i++ {
@@ -265,259 +260,174 @@ func CalculateRSSI(buf []byte) float64 {
 	meanR := sumR / float64(numSamples)
 	meanIm := sumIm / float64(numSamples)
 
-	var sumPower float64
+	var sumSq float64
 	for i := 0; i < numSamples; i++ {
 		r := (float64(buf[2*i]) - 127.5) / 127.5 - meanR
 		im := (float64(buf[2*i+1]) - 127.5) / 127.5 - meanIm
-		sumPower += r*r + im*im
+		sumSq += r*r + im*im
 	}
-	avgPower := sumPower / float64(numSamples)
-	if avgPower <= 1e-12 {
+
+	meanSq := sumSq / float64(numSamples)
+	if meanSq <= 0 {
 		return -100.0
 	}
-	return 10 * math.Log10(avgPower)
+
+	rms := math.Sqrt(meanSq / 2.0)
+	dbfs := 20 * math.Log10(rms + 1e-6)
+	if dbfs > 0 {
+		dbfs = 0
+	}
+	if dbfs < -100 {
+		dbfs = -100
+	}
+	return dbfs
 }
 
-// CalculateSignalAndNoise computes Signal Level (dBFS), Noise Floor (dBFS), and SNR (dB) using FFT bins
-func CalculateSignalAndNoise(buf []byte) (signal float64, noise float64, snr float64) {
+// CalculateSignalAndNoise calculates peak signal power, average noise floor power, and SNR in dB
+func CalculateSignalAndNoise(buf []byte) (signalDBFS, noiseDBFS, snrDB float64) {
 	numBins := 128
+	if len(buf)/2 < numBins {
+		return -100, -100, 0
+	}
+
 	numSamples := len(buf) / 2
-	if numSamples < numBins {
-		return -100.0, -100.0, 0.0
+	blocks := numSamples / numBins
+	if blocks > 8 {
+		blocks = 8
 	}
 
-	var sumR, sumIm float64
-	for i := 0; i < numSamples; i++ {
-		sumR += (float64(buf[2*i]) - 127.5) / 127.5
-		sumIm += (float64(buf[2*i+1]) - 127.5) / 127.5
-	}
-	meanR := sumR / float64(numSamples)
-	meanIm := sumIm / float64(numSamples)
+	avgPower := make([]float64, numBins)
 
-	fftInput := make([]complex128, numBins)
+	for b := 0; b < blocks; b++ {
+		fftInput := make([]complex128, numBins)
+		for i := 0; i < numBins; i++ {
+			idx := b*numBins + i
+			r := (float64(buf[2*idx]) - 127.5) / 127.5
+			im := (float64(buf[2*idx+1]) - 127.5) / 127.5
+			w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(numBins-1)))
+			fftInput[i] = complex(r*w, im*w)
+		}
+
+		fftOut := fft(fftInput)
+
+		for i := 0; i < numBins; i++ {
+			p := cmplx.Abs(fftOut[i])
+			pDb := 10 * math.Log10(p*p + 1e-12)
+			avgPower[i] += pDb
+		}
+	}
+
+	powers := make([]float64, numBins)
 	for i := 0; i < numBins; i++ {
-		r := (float64(buf[2*i]) - 127.5) / 127.5 - meanR
-		im := (float64(buf[2*i+1]) - 127.5) / 127.5 - meanIm
-		w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(numBins-1)))
-		fftInput[i] = complex(r*w, im*w)
-	}
-	fftOut := fft(fftInput)
-
-	bins := make([]float64, numBins)
-	half := numBins / 2
-	for i := 0; i < numBins; i++ {
-		shiftedIdx := (i + half) % numBins
-		p := cmplx.Abs(fftOut[shiftedIdx])
-		bins[i] = 10 * math.Log10(p*p + 1e-12)
+		powers[i] = avgPower[i] / float64(blocks)
 	}
 
-	// Center signal band (around DC): bins 61..67 (center in fftshift)
-	var signalSum float64
-	sigCount := 0
-	for i := 61; i <= 67; i++ {
-		signalSum += math.Pow(10, bins[i]/10.0)
-		sigCount++
+	centerBin := numBins / 2
+	if centerBin > 0 && centerBin < numBins-1 {
+		powers[centerBin] = (powers[centerBin-1] + powers[centerBin+1]) / 2.0
 	}
-	sigPowerLin := signalSum / float64(sigCount)
 
-	// Out-of-band Noise band: bins 10..40 and 88..118
-	var noiseSum float64
-	noiseCount := 0
-	for i := 10; i <= 40; i++ {
-		noiseSum += math.Pow(10, bins[i]/10.0)
-		noiseCount++
-	}
-	for i := 88; i <= 118; i++ {
-		noiseSum += math.Pow(10, bins[i]/10.0)
-		noiseCount++
-	}
-	noisePowerLin := noiseSum / float64(noiseCount)
+	sort.Float64s(powers)
 
-	signal = 10 * math.Log10(sigPowerLin + 1e-12)
-	noise = 10 * math.Log10(noisePowerLin + 1e-12)
-	snr = signal - noise
-	if snr < 0 {
-		snr = 0
+	noiseIdx := numBins / 5
+	noiseDBFS = powers[noiseIdx]
+
+	signalIdx := numBins * 95 / 100
+	signalDBFS = powers[signalIdx]
+
+	snrDB = signalDBFS - noiseDBFS
+	if snrDB < 0 {
+		snrDB = 0
 	}
-	return signal, noise, snr
+
+	return signalDBFS, noiseDBFS, snrDB
 }
 
+// WriteWAVHeader writes a standard 16-bit Mono PCM WAV file header
+func WriteWAVHeader(w io.Writer, sampleRate, numSamples int) error {
+	var header [44]byte
 
-// ConvertFloatToINT16 converts float64 PCM samples (-1.0 to 1.0) to int16 PCM samples (-32768 to 32767)
-func ConvertFloatToINT16(samples []float64) []int16 {
-	out := make([]int16, len(samples))
-	for i, v := range samples {
-		val := v * 32767.0
-		if val > 32767.0 {
-			val = 32767.0
-		}
-		if val < -32768.0 {
-			val = -32768.0
-		}
-		out[i] = int16(val)
-	}
-	return out
-}
+	copy(header[0:4], []byte("RIFF"))
+	dataSize := uint32(numSamples * 2)
+	fileSize := uint32(36 + dataSize)
+	binary.LittleEndian.PutUint32(header[4:8], fileSize)
+	copy(header[8:12], []byte("WAVE"))
 
-// SaveWAV writes int16 audio samples to a WAV file with standard headers
-func SaveWAV(filename string, sampleRate int, samples []int16) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	dataSize := uint32(len(samples) * 2)
-
-	header := make([]byte, 44)
-	copy(header[0:4], "RIFF")
-	binary.LittleEndian.PutUint32(header[4:8], dataSize+36)
-	copy(header[8:12], "WAVE")
-	copy(header[12:16], "fmt ")
+	copy(header[12:16], []byte("fmt "))
 	binary.LittleEndian.PutUint32(header[16:20], 16)
 	binary.LittleEndian.PutUint16(header[20:22], 1)
 	binary.LittleEndian.PutUint16(header[22:24], 1)
 	binary.LittleEndian.PutUint32(header[24:28], uint32(sampleRate))
-	binary.LittleEndian.PutUint32(header[28:32], uint32(sampleRate*2))
+	byteRate := uint32(sampleRate * 2)
+	binary.LittleEndian.PutUint32(header[28:32], byteRate)
 	binary.LittleEndian.PutUint16(header[32:34], 2)
 	binary.LittleEndian.PutUint16(header[34:36], 16)
-	copy(header[36:40], "data")
+
+	copy(header[36:40], []byte("data"))
 	binary.LittleEndian.PutUint32(header[40:44], dataSize)
 
-	if _, err := file.Write(header); err != nil {
+	_, err := w.Write(header[:])
+	return err
+}
+
+// SaveWAV saves int16 PCM samples to a 16-bit Mono WAV file
+func SaveWAV(filePath string, sampleRate int, int16Samples []int16) error {
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if err := WriteWAVHeader(f, sampleRate, len(int16Samples)); err != nil {
 		return err
 	}
 
-	for _, s := range samples {
-		if err := binary.Write(file, binary.LittleEndian, s); err != nil {
-			return err
-		}
+	buf := make([]byte, len(int16Samples)*2)
+	for i, s := range int16Samples {
+		binary.LittleEndian.PutUint16(buf[i*2:(i+1)*2], uint16(s))
 	}
 
-	return nil
+	_, err = f.Write(buf)
+	return err
 }
 
-// LoadWAV reads a WAV audio file and converts its PCM samples to float64 (-1.0 to 1.0) along with its sample rate
-func LoadWAV(filename string) ([]float64, int, error) {
-	file, err := os.Open(filename)
+// SaveAudioToWAV saves float64 PCM samples (-1.0 to 1.0) into a 16-bit Mono WAV file
+func SaveAudioToWAV(filePath string, sampleRate int, pcmSamples []float64) error {
+	int16Samples := ConvertFloatToINT16(pcmSamples)
+	return SaveWAV(filePath, sampleRate, int16Samples)
+}
+
+// LoadWAV loads a 16-bit Mono WAV file into float64 PCM samples
+func LoadWAV(filePath string) ([]float64, int, error) {
+	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer file.Close()
+	defer f.Close()
 
-	header := make([]byte, 12)
-	if _, err := io.ReadFull(file, header); err != nil {
-		return nil, 0, fmt.Errorf("invalid WAV header: %w", err)
+	var header [44]byte
+	if _, err := io.ReadFull(f, header[:]); err != nil {
+		return nil, 0, fmt.Errorf("failed to read WAV header: %w", err)
 	}
 
 	if string(header[0:4]) != "RIFF" || string(header[8:12]) != "WAVE" {
-		return nil, 0, fmt.Errorf("file is not a valid RIFF/WAVE file")
+		return nil, 0, errors.New("invalid WAV header format")
 	}
 
-	var numChannels uint16
-	var sampleRate uint32
-	var bitsPerSample uint16
-	var audioFormat uint16
-	var dataBytes []byte
+	sampleRate := int(binary.LittleEndian.Uint32(header[24:28]))
+	dataLen := binary.LittleEndian.Uint32(header[40:44])
 
-	// Read chunks
-	for {
-		chunkHeader := make([]byte, 8)
-		if _, err := io.ReadFull(file, chunkHeader); err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-				break
-			}
-			return nil, 0, err
-		}
-
-		chunkID := string(chunkHeader[0:4])
-		chunkSize := binary.LittleEndian.Uint32(chunkHeader[4:8])
-
-		if chunkID == "fmt " {
-			fmtBuf := make([]byte, chunkSize)
-			if _, err := io.ReadFull(file, fmtBuf); err != nil {
-				return nil, 0, fmt.Errorf("failed to read fmt chunk: %w", err)
-			}
-			if len(fmtBuf) < 16 {
-				return nil, 0, fmt.Errorf("invalid fmt chunk size")
-			}
-			audioFormat = binary.LittleEndian.Uint16(fmtBuf[0:2])
-			numChannels = binary.LittleEndian.Uint16(fmtBuf[2:4])
-			sampleRate = binary.LittleEndian.Uint32(fmtBuf[4:8])
-			bitsPerSample = binary.LittleEndian.Uint16(fmtBuf[14:16])
-		} else if chunkID == "data" {
-			dataBytes = make([]byte, chunkSize)
-			if _, err := io.ReadFull(file, dataBytes); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-				return nil, 0, fmt.Errorf("failed to read data chunk: %w", err)
-			}
-			break // Usually data is the main payload
-		} else {
-			// Skip unknown chunks
-			if _, err := file.Seek(int64(chunkSize), io.SeekCurrent); err != nil {
-				return nil, 0, fmt.Errorf("failed to seek chunk %s: %w", chunkID, err)
-			}
-		}
+	rawBuf := make([]byte, dataLen)
+	if _, err := io.ReadFull(f, rawBuf); err != nil && err != io.EOF {
+		return nil, 0, fmt.Errorf("failed to read WAV audio payload: %w", err)
 	}
 
-	if audioFormat != 1 && audioFormat != 3 { // 1 = PCM, 3 = IEEE Float
-		return nil, 0, fmt.Errorf("unsupported WAV audio format %d (only uncompressed PCM/IEEE Float supported)", audioFormat)
+	numSamples := len(rawBuf) / 2
+	pcmSamples := make([]float64, numSamples)
+	for i := 0; i < numSamples; i++ {
+		val := int16(binary.LittleEndian.Uint16(rawBuf[i*2 : (i+1)*2]))
+		pcmSamples[i] = float64(val) / 32767.0
 	}
 
-	if len(dataBytes) == 0 {
-		return nil, 0, fmt.Errorf("no audio data found in WAV file")
-	}
-
-	if numChannels == 0 {
-		numChannels = 1
-	}
-
-	bytesPerSample := int(bitsPerSample / 8)
-	if bytesPerSample == 0 {
-		bytesPerSample = 2 // default to 16-bit
-	}
-
-	totalSamples := len(dataBytes) / (bytesPerSample * int(numChannels))
-	samples := make([]float64, totalSamples)
-
-	for i := 0; i < totalSamples; i++ {
-		var sum float64
-		for ch := 0; ch < int(numChannels); ch++ {
-			offset := (i*int(numChannels) + ch) * bytesPerSample
-			if offset+bytesPerSample > len(dataBytes) {
-				break
-			}
-
-			var val float64
-			switch bitsPerSample {
-			case 8:
-				// Unsigned 8-bit PCM (0 to 255) -> -1.0 to 1.0
-				u8 := dataBytes[offset]
-				val = (float64(u8) - 128.0) / 128.0
-			case 16:
-				// Signed 16-bit PCM (-32768 to 32767)
-				s16 := int16(binary.LittleEndian.Uint16(dataBytes[offset : offset+2]))
-				val = float64(s16) / 32768.0
-			case 32:
-				if audioFormat == 3 {
-					// 32-bit IEEE float
-					bits := binary.LittleEndian.Uint32(dataBytes[offset : offset+4])
-					val = float64(math.Float32frombits(bits))
-				} else {
-					// Signed 32-bit PCM
-					s32 := int32(binary.LittleEndian.Uint32(dataBytes[offset : offset+4]))
-					val = float64(s32) / 2147483648.0
-				}
-			default:
-				// Fallback 16bit
-				s16 := int16(binary.LittleEndian.Uint16(dataBytes[offset : offset+2]))
-				val = float64(s16) / 32768.0
-			}
-			sum += val
-		}
-		// Average across channels to mono
-		samples[i] = sum / float64(numChannels)
-	}
-
-	return samples, int(sampleRate), nil
+	return pcmSamples, sampleRate, nil
 }
-
