@@ -13,7 +13,11 @@
   let sdrInfo = $state({ count: 0, name: 'Scanning...', is_present: false })
   let isStreaming = $state(false)
   let isRecording = $state(false)
+  let isDecoding = $state(false)
   let recordStatus = $state('')
+  let recordRemainingSec = $state(30)
+  let recordProgress = $state(0)
+  let recordTimer = null
 
   let canvasEl
   let ctx
@@ -60,6 +64,16 @@
     }
   }
 
+  async function handleFreqChange() {
+    if (window.go?.main?.App && isStreaming) {
+      try {
+        await window.go.main.App.SetSDRCenterFreq(Number(centerFreq))
+      } catch (err) {
+        console.error("Failed to set SDR frequency:", err)
+      }
+    }
+  }
+
   async function toggleStream() {
     if (!window.go?.main?.App) return
     if (isStreaming) {
@@ -71,25 +85,56 @@
     }
   }
 
+  function clearRecordTimer() {
+    if (recordTimer) {
+      clearInterval(recordTimer)
+      recordTimer = null
+    }
+  }
+
   async function startRecord() {
     if (!window.go?.main?.App) return
+    clearRecordTimer()
+
+    const totalDuration = 30
     isRecording = true
-    recordStatus = i18n.t('sdr.recordingProgress')
+    isDecoding = false
+    recordRemainingSec = totalDuration
+    recordProgress = 0
+    recordStatus = i18n.t('sdr.recordingCountdown').replace('{seconds}', totalDuration.toString())
+
+    const startTime = Date.now()
+    recordTimer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000
+      const remaining = Math.max(0, Math.ceil(totalDuration - elapsed))
+      recordRemainingSec = remaining
+      recordProgress = Math.min(100, Math.round((elapsed / totalDuration) * 100))
+
+      if (remaining > 0) {
+        recordStatus = i18n.t('sdr.recordingCountdown').replace('{seconds}', remaining.toString())
+      } else {
+        clearRecordTimer()
+        isDecoding = true
+        recordProgress = 100
+        recordStatus = i18n.t('sdr.decodingProgress')
+      }
+    }, 250)
 
     try {
       const satName = centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19')
-      const msg = await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, 30)
-      recordStatus = msg
+      await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, totalDuration, Number(tunerGain), autoGain)
     } catch (err) {
-      recordStatus = i18n.t('sdr.decodeFailed') + err
+      clearRecordTimer()
       isRecording = false
+      isDecoding = false
+      recordStatus = i18n.t('sdr.decodeFailed') + err
     }
   }
 
   function tunePreset(freq) {
     centerFreq = freq
     if (isStreaming) {
-      toggleStream().then(() => toggleStream())
+      handleFreqChange()
     }
   }
 
@@ -107,19 +152,25 @@
       })
 
       window.runtime.EventsOn('decode_complete', (record) => {
+        clearRecordTimer()
         isRecording = false
+        isDecoding = false
+        recordProgress = 100
         recordStatus = i18n.t('sdr.decodeSuccess')
         onDecoded(record)
       })
 
       window.runtime.EventsOn('decode_error', (errMsg) => {
+        clearRecordTimer()
         isRecording = false
+        isDecoding = false
         recordStatus = i18n.t('sdr.decodeFailed') + errMsg
       })
     }
   })
 
   onDestroy(() => {
+    clearRecordTimer()
     if (isStreaming && window.go?.main?.App) {
       window.go.main.App.StopSDR()
     }
@@ -241,16 +292,31 @@
           id="freq-input"
           type="number"
           bind:value={centerFreq}
+          oninput={handleFreqChange}
+          onchange={handleFreqChange}
           step="1000"
           class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm font-mono text-cyan-400 font-bold focus:outline-none focus:border-cyan-500"
         />
       </div>
 
-      <!-- Gain Slider -->
-      <div>
-        <div class="flex items-center justify-between mb-1">
+      <!-- Gain Slider & Auto Gain -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
           <label for="gain-slider" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">{i18n.t('sdr.gain')}</label>
-          <span class="text-xs font-mono text-cyan-400 font-bold">{(tunerGain / 10).toFixed(1)} dB</span>
+          <div class="flex items-center gap-3">
+            <label class="flex items-center gap-1.5 text-xs text-slate-300 font-semibold cursor-pointer select-none">
+              <input
+                type="checkbox"
+                bind:checked={autoGain}
+                onchange={handleGainChange}
+                class="rounded bg-slate-950 border-slate-700 text-cyan-500 focus:ring-cyan-500"
+              />
+              <span class="text-[11px] text-cyan-300">{i18n.t('sdr.autoGain')}</span>
+            </label>
+            <span class="text-xs font-mono text-cyan-400 font-bold min-w-[55px] text-right">
+              {autoGain ? i18n.t('sdr.autoGainBadge') : (tunerGain / 10).toFixed(1) + ' dB'}
+            </span>
+          </div>
         </div>
         <input
           id="gain-slider"
@@ -261,12 +327,12 @@
           bind:value={tunerGain}
           oninput={handleGainChange}
           disabled={autoGain}
-          class="w-full accent-cyan-500 bg-slate-950 rounded-lg h-2 cursor-pointer"
+          class="w-full accent-cyan-500 bg-slate-950 rounded-lg h-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         />
       </div>
 
-      <!-- Action Record Button -->
-      <div class="pt-2">
+      <!-- Action Record Button & Progress -->
+      <div class="pt-2 space-y-3">
         <button
           onclick={startRecord}
           disabled={isRecording}
@@ -276,8 +342,32 @@
           {i18n.t('sdr.startRecord')}
         </button>
 
-        {#if recordStatus}
-          <p class="text-xs font-medium text-cyan-300 mt-2 text-center bg-cyan-950/40 p-2 rounded-lg border border-cyan-800/40">
+        {#if isRecording}
+          <div class="bg-slate-950/80 p-3 rounded-xl border border-cyan-800/40 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-medium text-cyan-300 flex items-center gap-2">
+                <span class="relative flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                </span>
+                {#if isDecoding}
+                  {i18n.t('sdr.decodingProgress')}
+                {:else}
+                  {i18n.t('sdr.recordingCountdown').replace('{seconds}', recordRemainingSec.toString())}
+                {/if}
+              </span>
+              <span class="font-mono text-cyan-400 font-bold">{recordProgress}%</span>
+            </div>
+            <!-- Progress Bar -->
+            <div class="w-full bg-slate-800/80 rounded-full h-2 overflow-hidden border border-slate-700/50">
+              <div
+                class="h-full bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-400 transition-all duration-200"
+                style="width: {recordProgress}%"
+              ></div>
+            </div>
+          </div>
+        {:else if recordStatus}
+          <p class="text-xs font-medium text-cyan-300 text-center bg-cyan-950/40 p-2.5 rounded-xl border border-cyan-800/40">
             {recordStatus}
           </p>
         {/if}

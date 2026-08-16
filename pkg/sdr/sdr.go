@@ -127,15 +127,41 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) e
 	return nil
 }
 
+func (s *SDR) SetCenterFreq(freq int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.centerFreq == freq && s.device != nil {
+		return nil
+	}
+
+	s.centerFreq = freq
+
+	if s.device != nil && s.isStreaming && !s.simulationMode {
+		err := s.device.SetCenterFreq(freq)
+		if err != nil {
+			logger.Errorf("SDR", "Failed to set center frequency to %d Hz: %v", freq, err)
+			return err
+		}
+		logger.Infof("SDR", "Center frequency updated dynamically: %.4f MHz", float64(freq)/1e6)
+	}
+	return nil
+}
+
 func (s *SDR) SetGain(gain int, autoGain bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.gain == gain && s.autoGain == autoGain && s.device != nil {
+		return nil
+	}
 
 	s.gain = gain
 	s.autoGain = autoGain
 
 	if s.device != nil && s.isStreaming && !s.simulationMode {
 		_ = s.device.SetTunerGainMode(!autoGain)
+		_ = s.device.SetAgcMode(autoGain)
 		if !autoGain {
 			_ = s.device.SetTunerGain(gain)
 		}
@@ -175,17 +201,28 @@ func (s *SDR) IsSimulation() bool {
 func (s *SDR) runHardwareLoop() {
 	bufSize := 1024 * 128
 	buf := make([]byte, bufSize)
+	lastErrLog := time.Now().Add(-10 * time.Second)
 
 	for {
 		select {
 		case <-s.stopChan:
 			return
 		default:
-			if s.device == nil {
-				return
+			s.mu.Lock()
+			dev := s.device
+			s.mu.Unlock()
+
+			if dev == nil {
+				time.Sleep(10 * time.Millisecond)
+				continue
 			}
-			n, err := s.device.ReadSync(buf, len(buf))
+
+			n, err := dev.ReadSync(buf, len(buf))
 			if err != nil || n == 0 {
+				if time.Since(lastErrLog) >= 2*time.Second {
+					logger.Warnf("SDR", "ReadSync warning (n=%d, err=%v), retrying...", n, err)
+					lastErrLog = time.Now()
+				}
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}

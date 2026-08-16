@@ -132,7 +132,7 @@ func (a *App) startAutoRecordScheduler() {
 								"duration":  duration,
 							})
 						}
-						a.StartRecordingAndDecode(sat.Name, sat.Frequency, duration)
+						a.StartRecordingAndDecode(sat.Name, sat.Frequency, duration, cfg.TunerGain, cfg.TunerGainAuto)
 						break
 					} else {
 						logger.Debugf("SCHEDULER", "Pass already recorded for key %s, skipping", passKey)
@@ -225,6 +225,14 @@ func (a *App) StartSDR(freq, sampleRate, gain int, autoGain, forceSim bool) stri
 	return "SDR stream started"
 }
 
+func (a *App) SetSDRCenterFreq(freq int) string {
+	err := a.sdrService.SetCenterFreq(freq)
+	if err != nil {
+		return fmt.Sprintf("Failed to set SDR frequency: %v", err)
+	}
+	return "SDR frequency updated"
+}
+
 func (a *App) SetSDRGain(gain int, autoGain bool) string {
 	err := a.sdrService.SetGain(gain, autoGain)
 	if err != nil {
@@ -239,7 +247,7 @@ func (a *App) StopSDR() string {
 }
 
 // Recording & Decoder API
-func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int) string {
+func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int, gain int, autoGain bool) string {
 	a.recMu.Lock()
 	if a.recording {
 		a.recMu.Unlock()
@@ -263,7 +271,10 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 
 		cfg := a.store.GetConfig()
 		if !a.sdrService.IsStreaming() {
-			_ = a.sdrService.StartStream(freq, cfg.SampleRate, cfg.TunerGain, cfg.TunerGainAuto, cfg.SimulationMode)
+			_ = a.sdrService.StartStream(freq, cfg.SampleRate, gain, autoGain, cfg.SimulationMode)
+		} else {
+			_ = a.sdrService.SetCenterFreq(freq)
+			_ = a.sdrService.SetGain(gain, autoGain)
 		}
 
 		sub := a.sdrService.Subscribe()
@@ -272,7 +283,11 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int)
 		dspEngine := dsp.NewDSP(cfg.SampleRate, 20800)
 		var pcmSamples []float64
 
-		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%.1fdB", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, float64(cfg.TunerGain)/10.0)
+		gainDisplay := fmt.Sprintf("%.1fdB", float64(gain)/10.0)
+		if autoGain {
+			gainDisplay = "AUTO (AGC)"
+		}
+		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%s", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, gainDisplay)
 
 		var totalRssi float64
 		var rssiCount int

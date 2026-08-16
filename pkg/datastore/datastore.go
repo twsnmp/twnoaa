@@ -148,7 +148,7 @@ func (s *Store) initBuckets(baseDir string) error {
 				SampleRate:         2080000,
 				TunerGain:          400,
 				TunerGainAuto:      false,
-				SimulationMode:     true,  // Default to simulation if no hardware connected
+				SimulationMode:     false, // Default to hardware mode (falls back automatically if no hardware)
 				AutoRecord:         false, // Default OFF
 				AutoRecordDuration: 30,
 				DataDir:            baseDir,
@@ -192,7 +192,7 @@ func (s *Store) GetConfig() Config {
 		SampleRate:         2080000,
 		TunerGain:          380, // 38.0 dB optimal gain for dipole antenna without external LNA
 		TunerGainAuto:      false,
-		SimulationMode:     true,
+		SimulationMode:     false,
 		AutoRecord:         false,
 		AutoRecordDuration: 30,
 	}

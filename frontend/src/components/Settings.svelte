@@ -19,6 +19,7 @@
     auto_record: false,
     auto_record_duration: 30,
     tuner_gain: 400,
+    tuner_gain_auto: false,
     sample_rate: 2080000
   })
 
@@ -208,13 +209,32 @@
         </div>
       {/if}
 
+      <label for="auto-gain-checkbox" class="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
+        <input
+          id="auto-gain-checkbox"
+          type="checkbox"
+          bind:checked={cfg.tuner_gain_auto}
+          class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-cyan-500"
+        />
+        <div>
+          <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.autoGainSetting')}</span>
+          <span class="text-[10px] text-slate-500 block">{i18n.t('settings.autoGainSettingDesc')}</span>
+        </div>
+      </label>
+
       <div>
-        <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.defaultGain')}</label>
+        <div class="flex items-center justify-between mb-1">
+          <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">{i18n.t('settings.defaultGain')}</label>
+          <span class="text-xs font-mono text-cyan-400 font-bold">
+            {cfg.tuner_gain_auto ? i18n.t('sdr.autoGainBadge') : (cfg.tuner_gain / 10).toFixed(1) + ' dB'}
+          </span>
+        </div>
         <input
           id="default-gain-input"
           type="number"
           bind:value={cfg.tuner_gain}
-          class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+          disabled={cfg.tuner_gain_auto}
+          class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
         />
       </div>
     </div>
