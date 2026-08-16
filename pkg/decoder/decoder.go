@@ -23,6 +23,15 @@ type DecodeResult struct {
 	SyncOffset    int    `json:"sync_offset"`
 }
 
+// DecodeWAVFile loads a WAV file and runs DecodeAPT
+func DecodeWAVFile(wavPath, outDir, baseName string) (*DecodeResult, error) {
+	samples, sampleRate, err := dsp.LoadWAV(wavPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load WAV file %s: %w", wavPath, err)
+	}
+	return DecodeAPT(samples, sampleRate, outDir, baseName)
+}
+
 // DecodeAPT processes demodulated audio float64 samples (-1.0 to 1.0) and generates APT satellite images
 func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*DecodeResult, error) {
 	if len(samples) == 0 {
@@ -33,19 +42,18 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 	durationSec := float64(len(samples)) / float64(sampleRate)
 	logger.Infof("DECODER", "Starting APT decode: baseName=%s, total_samples=%d (duration=%.1fs), sample_rate=%dHz", baseName, len(samples), durationSec, sampleRate)
 
-	// Ensure output directory exists
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		logger.Errorf("DECODER", "Failed to create output directory %s: %v", outDir, err)
 		return nil, fmt.Errorf("failed to create output directory %s: %w", outDir, err)
 	}
 
-	// 1. Extract AM envelope
+	// 1. Extract 2400 Hz AM envelope with 1600 Hz LPF
 	envelope := extractEnvelope(samples, sampleRate)
 
 	// 2. Slice into 0.5s line chunks and resample to 2080 px TargetWidth
 	samplesPerLine := int(float64(sampleRate) * 0.5)
 	if samplesPerLine <= 0 {
-		samplesPerLine = 10400 // fallback for 20800 Hz
+		samplesPerLine = 10400
 	}
 
 	var rawFloatLines [][]float64
@@ -61,27 +69,28 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 
 	logger.Infof("DECODER", "Extracted %d APT image lines (target_width=%d px)", len(rawFloatLines), TargetWidth)
 
-	// Robust float64 contrast normalization to stretch 1st-99th percentile across 0-255 uint8 range
+	// Contrast normalization to stretch 1st-99th percentile across 0-255 uint8 range
 	rawLines := normalizeLines(rawFloatLines)
 
-	// 3. Find global Sync A pulse offset across column sums
+	// 3. Global Sync A pulse offset detection
 	globalOffset := findGlobalSyncOffset(rawLines)
 	logger.Infof("DECODER", "Global Sync A pulse offset alignment detected at column x=%d px", globalOffset)
 
-	// 4. Align all lines using global offset shift
+	// 4. Per-line Sync A fine alignment (Line Sync Matching to eliminate line jitter/skew)
 	alignedLines := make([][]uint8, len(rawLines))
 	for y := 0; y < len(rawLines); y++ {
-		alignedLines[y] = shiftLine(rawLines[y], globalOffset)
+		lineOffset := findLineSyncOffset(rawLines[y], globalOffset)
+		alignedLines[y] = shiftLine(rawLines[y], lineOffset)
 	}
 
-	// 5. Save full image (Channel A + B side-by-side)
+	// 5. Save full image
 	fullPath := fmt.Sprintf("%s/%s_full.png", outDir, baseName)
 	if err := savePNG(fullPath, alignedLines); err != nil {
 		logger.Errorf("DECODER", "Failed to save full APT image %s: %v", fullPath, err)
 		return nil, fmt.Errorf("failed to save full image: %w", err)
 	}
 
-	// 6. Save Channel A (Visible half) and Channel B (IR half) according to NOAA APT specs
+	// 6. Save Channel A (Visible) and Channel B (IR)
 	chanALines := extractSubImage(alignedLines, 86, 995)
 	chanBLines := extractSubImage(alignedLines, 1126, 2035)
 
@@ -110,41 +119,28 @@ func extractEnvelope(samples []float64, sampleRate int) []float64 {
 	carrierFreq := 2400.0
 	dt := 2.0 * math.Pi * carrierFreq / sr
 
-	env := make([]float64, len(samples))
-	iSamples := make([]float64, len(samples))
-	qSamples := make([]float64, len(samples))
+	envRaw := make([]float64, len(samples))
 
 	// 1. Quadrature mixing with 2400 Hz subcarrier to downconvert 2400 Hz to DC
 	for n := 0; n < len(samples); n++ {
 		angle := float64(n) * dt
-		iSamples[n] = samples[n] * math.Cos(angle)
-		qSamples[n] = samples[n] * math.Sin(angle)
+		iVal := samples[n] * math.Cos(angle)
+		qVal := samples[n] * math.Sin(angle)
+		envRaw[n] = math.Sqrt(iVal*iVal + qVal*qVal)
 	}
 
-	// 2. Low-pass filter (moving average) to reject out-of-band audio noise and 4800Hz harmonics
-	// Window size scaled to sample rate (~1 pixel width at TargetWidth=2080, e.g. 5 samples at 20800 Hz => window=2)
-	window := int(sr / 8320.0)
-	if window < 1 {
-		window = 1
-	}
+	// 2. Baseband Low-Pass Filter (~1600 Hz cutoff) to remove pixel noise and 4800Hz subcarrier ripple
+	alpha := math.Exp(-2.0 * math.Pi * 1600.0 / sr)
+	oneMinusAlpha := 1.0 - alpha
+
+	envFiltered := make([]float64, len(samples))
+	var lpfState float64
 	for n := 0; n < len(samples); n++ {
-		sumI := 0.0
-		sumQ := 0.0
-		count := 0
-		for w := -window; w <= window; w++ {
-			idx := n + w
-			if idx >= 0 && idx < len(samples) {
-				sumI += iSamples[idx]
-				sumQ += qSamples[idx]
-				count++
-			}
-		}
-		avgI := sumI / float64(count)
-		avgQ := sumQ / float64(count)
-		env[n] = math.Sqrt(avgI*avgI + avgQ*avgQ)
+		lpfState = lpfState*alpha + envRaw[n]*oneMinusAlpha
+		envFiltered[n] = lpfState
 	}
 
-	return env
+	return envFiltered
 }
 
 func findGlobalSyncOffset(lines [][]uint8) int {
@@ -162,9 +158,6 @@ func findGlobalSyncOffset(lines [][]uint8) int {
 	bestX := 0
 	maxDiff := -1e9
 
-	// Sync A consists of 7 cycles of 1040 Hz square wave.
-	// At 2080 px per 0.5s line, each 1040 Hz cycle is 4 px wide (2 px HIGH, 2 px LOW).
-	// Search in the first half of the line (Channel A region) where Sync A is located.
 	for x := 0; x < TargetWidth/2; x++ {
 		diff := 0.0
 		for p := 0; p < 7; p++ {
@@ -181,6 +174,30 @@ func findGlobalSyncOffset(lines [][]uint8) int {
 	}
 
 	return bestX
+}
+
+func findLineSyncOffset(line []uint8, globalOffset int) int {
+	searchRange := 12
+	bestOffset := globalOffset
+	maxDiff := -1e9
+
+	for delta := -searchRange; delta <= searchRange; delta++ {
+		x := (globalOffset + delta + TargetWidth) % TargetWidth
+		diff := 0.0
+		for p := 0; p < 7; p++ {
+			h1 := (x + p*4) % TargetWidth
+			h2 := (x + p*4 + 1) % TargetWidth
+			l1 := (x + p*4 + 2) % TargetWidth
+			l2 := (x + p*4 + 3) % TargetWidth
+			diff += float64(line[h1]) + float64(line[h2]) - (float64(line[l1]) + float64(line[l2]))
+		}
+		if diff > maxDiff {
+			maxDiff = diff
+			bestOffset = x
+		}
+	}
+
+	return bestOffset
 }
 
 func shiftLine(line []uint8, offset int) []uint8 {
@@ -251,23 +268,30 @@ func normalizeLines(lines [][]float64) [][]uint8 {
 }
 
 func extractSubImage(lines [][]uint8, startX, endX int) [][]uint8 {
-	res := make([][]uint8, len(lines))
-	subWidth := endX - startX
+	if len(lines) == 0 {
+		return nil
+	}
+	subWidth := endX - startX + 1
+	if subWidth <= 0 {
+		return nil
+	}
+
+	sub := make([][]uint8, len(lines))
 	for y := 0; y < len(lines); y++ {
-		res[y] = make([]uint8, subWidth)
+		sub[y] = make([]uint8, subWidth)
 		for x := 0; x < subWidth; x++ {
 			srcX := startX + x
-			if srcX < len(lines[y]) {
-				res[y][x] = lines[y][srcX]
+			if srcX >= 0 && srcX < len(lines[y]) {
+				sub[y][x] = lines[y][srcX]
 			}
 		}
 	}
-	return res
+	return sub
 }
 
-func savePNG(filename string, lines [][]uint8) error {
-	if len(lines) == 0 {
-		return fmt.Errorf("empty lines")
+func savePNG(filePath string, lines [][]uint8) error {
+	if len(lines) == 0 || len(lines[0]) == 0 {
+		return fmt.Errorf("empty image lines")
 	}
 
 	height := len(lines)
@@ -280,23 +304,11 @@ func savePNG(filename string, lines [][]uint8) error {
 		}
 	}
 
-	file, err := os.Create(filename)
+	f, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer f.Close()
 
-	return png.Encode(file, img)
+	return png.Encode(f, img)
 }
-
-// DecodeWAVFile loads a WAV audio file and decodes it into APT images
-func DecodeWAVFile(wavPath, outDir, baseName string) (*DecodeResult, error) {
-	samples, sampleRate, err := dsp.LoadWAV(wavPath)
-	if err != nil {
-		logger.Errorf("DECODER", "Failed to load WAV file %s: %v", wavPath, err)
-		return nil, fmt.Errorf("failed to load WAV file: %w", err)
-	}
-
-	return DecodeAPT(samples, sampleRate, outDir, baseName)
-}
-

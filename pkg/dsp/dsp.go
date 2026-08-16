@@ -78,8 +78,8 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 		audioDec = 1
 	}
 
-	// 1. Low-Pass Filter (~40 kHz cutoff) & Decimate raw 2.08 MHz IQ to 104 kHz rate
-	alpha := math.Exp(-2.0 * math.Pi * 40000.0 / float64(d.sampleRate))
+	// 1. Low-Pass Filter (~18 kHz cutoff for 36 kHz APT IF bandwidth) & Decimate raw 2.08 MHz IQ to 104 kHz rate
+	alpha := math.Exp(-2.0 * math.Pi * 18000.0 / float64(d.sampleRate))
 	oneMinusAlpha := 1.0 - alpha
 
 	decimatedIQ := make([]complex128, 0, len(iq)/iqDec)
