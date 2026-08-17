@@ -1,8 +1,9 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload } from '@lucide/svelte'
+  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload, Music, Volume2, PlayCircle } from '@lucide/svelte'
   import SignalChart from './SignalChart.svelte'
+  import AudioPlayer from './AudioPlayer.svelte'
 
   let { onRunAI = () => {} } = $props()
 
@@ -13,9 +14,25 @@
   let recordToDelete = $state(null)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
-  let detailViewTab = $state('image') // 'image' | 'signal'
+  let detailViewTab = $state('image') // 'image' | 'signal' | 'audio'
   let decodingWav = $state(false)
   let wavStatusMsg = $state('')
+  let standaloneWavPath = $state('')
+  let showStandaloneAudioModal = $state(false)
+
+  async function handleOpenAndPlayWAV() {
+    if (window.go?.main?.App?.SelectWAVFile) {
+      try {
+        const path = await window.go.main.App.SelectWAVFile()
+        if (path) {
+          standaloneWavPath = path
+          showStandaloneAudioModal = true
+        }
+      } catch (err) {
+        console.error("Failed to select WAV file:", err)
+      }
+    }
+  }
 
   async function handleDecodeWAV() {
     if (window.go?.main?.App?.SelectAndDecodeWAV) {
@@ -288,6 +305,15 @@
       {/if}
       <button
         type="button"
+        onclick={handleOpenAndPlayWAV}
+        class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-cyan-500/50 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer"
+        title={i18n.t('gallery.openWavFile')}
+      >
+        <Music class="w-4 h-4 text-cyan-400" />
+        {i18n.t('gallery.playWavFile')}
+      </button>
+      <button
+        type="button"
         onclick={handleDecodeWAV}
         disabled={decodingWav}
         class="px-3.5 py-2 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
@@ -305,7 +331,15 @@
       <p class="text-xs text-slate-500 max-w-md mx-auto">
         {i18n.t('gallery.empty')}
       </p>
-      <div class="pt-2">
+      <div class="pt-2 flex items-center justify-center gap-3">
+        <button
+          type="button"
+          onclick={handleOpenAndPlayWAV}
+          class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-all shadow-lg active:scale-95 cursor-pointer"
+        >
+          <Music class="w-4 h-4 text-cyan-400" />
+          {i18n.t('gallery.playWavFile')}
+        </button>
         <button
           type="button"
           onclick={handleDecodeWAV}
@@ -342,6 +376,12 @@
               </div>
 
               <div class="flex items-center gap-1.5">
+                {#if rec.audio_path}
+                  <span class="p-1 bg-cyan-500/10 text-cyan-400 rounded-md border border-cyan-500/20" title="WAV Audio Available">
+                    <Music class="w-3 h-3" />
+                  </span>
+                {/if}
+
                 {#if (rec.signal_history && rec.signal_history.length > 0) || (rec.avg_rssi !== undefined && rec.avg_rssi !== 0 && rec.avg_rssi !== -100)}
                   {@const sig = getSignalStatus(rec)}
                   <span class="px-1.5 py-1 rounded-lg border text-[10px] font-medium flex items-center gap-1 {sig.badgeClass}" title={`${i18n.t('gallery.signalLabel')} ${sig.label} - ${sig.detailText}`}>
@@ -402,7 +442,8 @@
               </div>
             </div>
 
-            <div class="flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <!-- Detail Tabs -->
               <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
                 <button
                   onclick={() => detailViewTab = 'image'}
@@ -418,56 +459,45 @@
                   <Activity class="w-3.5 h-3.5" />
                   {i18n.t('gallery.signalHistoryTab')}
                 </button>
+                <button
+                  onclick={() => detailViewTab = 'audio'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'audio' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                >
+                  <Music class="w-3.5 h-3.5" />
+                  {i18n.t('gallery.audioTab')}
+                </button>
               </div>
 
+              <!-- Image Options (Channel & Aspect Ratio Selects) -->
               {#if detailViewTab === 'image'}
-                <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                  <button
-                    onclick={() => viewMode = 'stretch'}
-                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'stretch' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                    title={i18n.t('gallery.stretchY')}
+                <div class="flex items-center gap-2">
+                  <select
+                    bind:value={activeChannel}
+                    class="bg-slate-950 text-slate-200 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-cyan-500 cursor-pointer transition-colors shadow-sm"
                   >
-                    {i18n.t('gallery.stretchY')}
-                  </button>
-                  <button
-                    onclick={() => viewMode = 'fit'}
-                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {viewMode === 'fit' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                    title={i18n.t('gallery.fitAspect')}
-                  >
-                    {i18n.t('gallery.fitAspect')}
-                  </button>
-                </div>
+                    <option value="full">{i18n.t('gallery.viewFull')}</option>
+                    <option value="chanA">{i18n.t('gallery.viewChanA')}</option>
+                    <option value="chanB">{i18n.t('gallery.viewChanB')}</option>
+                  </select>
 
-                <div class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
-                  <button
-                    onclick={() => activeChannel = 'full'}
-                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'full' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  <select
+                    bind:value={viewMode}
+                    class="bg-slate-950 text-slate-200 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-cyan-500 cursor-pointer transition-colors shadow-sm"
                   >
-                    {i18n.t('gallery.viewFull')}
-                  </button>
-                  <button
-                    onclick={() => activeChannel = 'chanA'}
-                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanA' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                  >
-                    {i18n.t('gallery.viewChanA')}
-                  </button>
-                  <button
-                    onclick={() => activeChannel = 'chanB'}
-                    class="px-2.5 py-1 rounded-lg font-medium transition-colors {activeChannel === 'chanB' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
-                  >
-                    {i18n.t('gallery.viewChanB')}
-                  </button>
+                    <option value="stretch">{i18n.t('gallery.stretchY')}</option>
+                    <option value="fit">{i18n.t('gallery.fitAspect')}</option>
+                  </select>
                 </div>
               {/if}
 
               <button
                 type="button"
                 onclick={(e) => promptDelete(selectedRecord, e)}
-                class="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/30 text-xs font-medium flex items-center gap-1.5 transition-all"
+                class="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/30 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
                 title={i18n.t('gallery.delete')}
               >
                 <Trash2 class="w-3.5 h-3.5" />
-                {i18n.t('gallery.delete')}
+                <span>{i18n.t('gallery.delete')}</span>
               </button>
             </div>
           </div>
@@ -497,9 +527,41 @@
                 </div>
               {/if}
             </div>
-          {:else}
+          {:else if detailViewTab === 'signal'}
             <div class="bg-slate-950/60 rounded-xl border border-slate-800 p-4">
               <SignalChart signalHistory={selectedRecord.signal_history || []} />
+            </div>
+          {:else if detailViewTab === 'audio'}
+            <div class="space-y-4">
+              <AudioPlayer
+                audioPath={selectedRecord.audio_path}
+                title={`${selectedRecord.sat_name} APT Recorded Audio`}
+              />
+
+              <div class="bg-slate-950/60 rounded-xl border border-slate-800 p-4 space-y-2 text-xs text-slate-400">
+                <h5 class="font-bold text-slate-300 flex items-center gap-2">
+                  <Activity class="w-4 h-4 text-cyan-400" />
+                  APT Audio Stream Information
+                </h5>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 font-mono text-[11px]">
+                  <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                    <span class="text-slate-500 block text-[10px]">Sampling Rate</span>
+                    <span class="text-slate-200 font-bold">20,800 Hz (Mono)</span>
+                  </div>
+                  <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                    <span class="text-slate-500 block text-[10px]">Subcarrier</span>
+                    <span class="text-slate-200 font-bold">2,400 Hz AM</span>
+                  </div>
+                  <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                    <span class="text-slate-500 block text-[10px]">Max Elevation</span>
+                    <span class="text-slate-200 font-bold">{selectedRecord.max_elevation}°</span>
+                  </div>
+                  <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                    <span class="text-slate-500 block text-[10px]">Average RSSI</span>
+                    <span class="text-slate-200 font-bold">{selectedRecord.avg_rssi ? selectedRecord.avg_rssi.toFixed(1) : 'N/A'} dBFS</span>
+                  </div>
+                </div>
+              </div>
             </div>
           {/if}
 
@@ -586,3 +648,53 @@
     </div>
   </div>
 {/if}
+
+<!-- Standalone WAV Audio Playback Modal -->
+{#if showStandaloneAudioModal && standaloneWavPath}
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-cyan-400">
+          <div class="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
+            <Music class="w-5 h-5 text-cyan-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('gallery.playWavFile')}</h3>
+            <p class="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-xs">{standaloneWavPath.split(/[/\\]/).pop()}</p>
+          </div>
+        </div>
+        <button
+          onclick={() => showStandaloneAudioModal = false}
+          class="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <AudioPlayer
+        audioPath={standaloneWavPath}
+        title={standaloneWavPath.split(/[/\\]/).pop()}
+      />
+
+      <div class="flex items-center justify-between pt-2 text-xs">
+        <button
+          type="button"
+          onclick={handleOpenAndPlayWAV}
+          class="text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1.5 cursor-pointer"
+        >
+          <Upload class="w-3.5 h-3.5" />
+          {i18n.t('gallery.openWavFile')}
+        </button>
+
+        <button
+          type="button"
+          onclick={() => showStandaloneAudioModal = false}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+

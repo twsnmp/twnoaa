@@ -204,11 +204,17 @@
     }
     const goodCount = signalHistory.filter(p => p.snr >= 10.0).length
     const ratio = (goodCount / signalHistory.length) * 100
-    // signalHistory samples are recorded every second
+
+    // Compute actual duration in seconds using time_sec
+    const firstTime = signalHistory[0]?.time_sec ?? 0
+    const lastTime = signalHistory[signalHistory.length - 1]?.time_sec ?? 0
+    const totalDuration = Math.max(0, lastTime - firstTime)
+    const durationSec = (ratio / 100) * totalDuration
+
     return {
       count: goodCount,
       ratio: ratio,
-      durationSec: goodCount
+      durationSec: Math.round(durationSec)
     }
   })
 

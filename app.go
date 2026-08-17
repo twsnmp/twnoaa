@@ -519,6 +519,41 @@ func (a *App) GetImageBase64(imagePath string) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 }
 
+func (a *App) GetAudioBase64(audioPath string) string {
+	if audioPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(audioPath)
+	if err != nil {
+		logger.Warnf("APP", "Failed to read audio file %s: %v", audioPath, err)
+		return ""
+	}
+	return "data:audio/wav;base64," + base64.StdEncoding.EncodeToString(data)
+}
+
+// SelectWAVFile opens a file dialog to select a WAV file and returns its path
+func (a *App) SelectWAVFile() string {
+	if a.ctx == nil {
+		return ""
+	}
+
+	selectedPath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select WAV Audio File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "WAV Audio (*.wav)",
+				Pattern:     "*.wav",
+			},
+		},
+	})
+	if err != nil {
+		logger.Warnf("APP", "Error selecting WAV file: %v", err)
+		return ""
+	}
+
+	return selectedPath
+}
+
 func (a *App) DeletePassRecord(recordID string) string {
 	records := a.store.GetRecords()
 	for _, r := range records {
