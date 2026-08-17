@@ -14,6 +14,8 @@
   let isStreaming = $state(false)
   let isRecording = $state(false)
   let isDecoding = $state(false)
+  let isAutoRecording = $state(false)
+  let autoRecordSat = $state('')
   let recordStatus = $state('')
   let recordRemainingSec = $state(30)
   let recordProgress = $state(0)
@@ -50,6 +52,20 @@
         }
       } catch (err) {
         console.error("Failed to load config:", err)
+      }
+    }
+  }
+
+  async function checkInitialRecordingStatus() {
+    if (window.go?.main?.App?.IsRecording) {
+      try {
+        const rec = await window.go.main.App.IsRecording()
+        if (rec) {
+          isRecording = true
+          recordStatus = i18n.t('sdr.recording')
+        }
+      } catch (err) {
+        console.error("Failed to check initial recording status:", err)
       }
     }
   }
@@ -92,8 +108,37 @@
     }
   }
 
+  function startAutoRecordTimer(satName, duration) {
+    clearRecordTimer()
+    isAutoRecording = true
+    autoRecordSat = satName
+    isRecording = true
+    isDecoding = false
+    recordRemainingSec = duration
+    recordProgress = 0
+    recordStatus = i18n.t('sdr.autoRecordingInProgress').replace('{sat}', satName).replace('{seconds}', duration.toString())
+
+    const startTime = Date.now()
+    recordTimer = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000
+      const remaining = Math.max(0, Math.ceil(duration - elapsed))
+      recordRemainingSec = remaining
+      recordProgress = Math.min(100, Math.round((elapsed / duration) * 100))
+
+      if (remaining > 0) {
+        recordStatus = i18n.t('sdr.autoRecordingInProgress').replace('{sat}', satName).replace('{seconds}', remaining.toString())
+      } else {
+        clearRecordTimer()
+        isDecoding = true
+        recordProgress = 100
+        recordStatus = i18n.t('sdr.decodingProgress')
+      }
+    }, 250)
+  }
+
   async function startRecord() {
     if (!window.go?.main?.App) return
+    if (isRecording || isDecoding || isAutoRecording) return
     clearRecordTimer()
 
     const totalDuration = 30
@@ -122,12 +167,15 @@
 
     try {
       const satName = centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19')
-      await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, totalDuration, Number(tunerGain), autoGain)
+      const err = await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, totalDuration, Number(tunerGain), autoGain)
+      if (err) {
+        throw new Error(err)
+      }
     } catch (err) {
       clearRecordTimer()
       isRecording = false
       isDecoding = false
-      recordStatus = i18n.t('sdr.decodeFailed') + err
+      recordStatus = i18n.t('sdr.decodeFailed') + (err?.message || err)
     }
   }
 
@@ -141,6 +189,7 @@
   onMount(() => {
     loadSDRInfo()
     loadConfig()
+    checkInitialRecordingStatus()
 
     if (canvasEl) {
       ctx = canvasEl.getContext('2d')
@@ -151,8 +200,20 @@
         drawWaterfall(bins)
       })
 
+      window.runtime.EventsOn('auto_record_started', (data) => {
+        startAutoRecordTimer(data?.sat_name || 'NOAA', data?.duration || 30)
+      })
+
+      window.runtime.EventsOn('auto_record_ended', () => {
+        clearRecordTimer()
+        isAutoRecording = false
+        isRecording = false
+        isDecoding = false
+      })
+
       window.runtime.EventsOn('decode_complete', (record) => {
         clearRecordTimer()
+        isAutoRecording = false
         isRecording = false
         isDecoding = false
         recordProgress = 100
@@ -162,6 +223,7 @@
 
       window.runtime.EventsOn('decode_error', (errMsg) => {
         clearRecordTimer()
+        isAutoRecording = false
         isRecording = false
         isDecoding = false
         recordStatus = i18n.t('sdr.decodeFailed') + errMsg
@@ -335,14 +397,20 @@
       <div class="pt-2 space-y-3">
         <button
           onclick={startRecord}
-          disabled={isRecording}
-          class="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+          disabled={isRecording || isDecoding || isAutoRecording}
+          class="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Disc class="w-4 h-4 {isRecording ? 'animate-spin text-amber-300' : ''}" />
-          {i18n.t('sdr.startRecord')}
+          <Disc class="w-4 h-4 {isRecording || isAutoRecording ? 'animate-spin text-amber-300' : ''}" />
+          {#if isAutoRecording}
+            {i18n.t('sdr.autoRecordingInProgress').replace('{sat}', autoRecordSat).replace('{seconds}', recordRemainingSec.toString())}
+          {:else if isRecording}
+            {i18n.t('sdr.recording')}
+          {:else}
+            {i18n.t('sdr.startRecord')}
+          {/if}
         </button>
 
-        {#if isRecording}
+        {#if isRecording || isAutoRecording}
           <div class="bg-slate-950/80 p-3 rounded-xl border border-cyan-800/40 space-y-2">
             <div class="flex items-center justify-between text-xs">
               <span class="font-medium text-cyan-300 flex items-center gap-2">
@@ -352,6 +420,8 @@
                 </span>
                 {#if isDecoding}
                   {i18n.t('sdr.decodingProgress')}
+                {:else if isAutoRecording}
+                  {i18n.t('sdr.autoRecordingInProgress').replace('{sat}', autoRecordSat).replace('{seconds}', recordRemainingSec.toString())}
                 {:else}
                   {i18n.t('sdr.recordingCountdown').replace('{seconds}', recordRemainingSec.toString())}
                 {/if}

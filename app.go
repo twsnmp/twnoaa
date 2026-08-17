@@ -247,12 +247,18 @@ func (a *App) StopSDR() string {
 }
 
 // Recording & Decoder API
-func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int, gain int, autoGain bool) string {
+func (a *App) IsRecording() bool {
+	a.recMu.Lock()
+	defer a.recMu.Unlock()
+	return a.recording
+}
+
+func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int, gain int, autoGain bool) error {
 	a.recMu.Lock()
 	if a.recording {
 		a.recMu.Unlock()
 		logger.Warnf("RECORDING", "Recording request ignored: recording already in progress")
-		return "Recording is already in progress"
+		return fmt.Errorf("recording is already in progress")
 	}
 	a.recording = true
 	a.recMu.Unlock()
@@ -413,7 +419,7 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		}
 	}()
 
-	return fmt.Sprintf("Started recording for %d seconds...", durationSec)
+	return nil
 }
 
 func (a *App) getSatMaxElevationInfo(satName string, cfg datastore.Config, recStartTime time.Time) (float64, float64) {

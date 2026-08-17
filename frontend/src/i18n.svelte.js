@@ -72,7 +72,9 @@ const translations = {
       decodeSuccess: "Decoding Complete! View image in Gallery.",
       decodeFailed: "Decode Failed: ",
       deviceFound: "RTL-SDR Device #{id} ({count} found)",
-      noHardware: "No Hardware (Simulation Mode)"
+      noHardware: "No Hardware (Simulation Mode)",
+      autoRecordingInProgress: "Auto-recording {sat} in progress... {seconds}s remaining",
+      recordingBusy: "Recording already in progress"
     },
     gallery: {
       title: "Decoded APT Image Gallery",
@@ -240,7 +242,9 @@ const translations = {
       decodeSuccess: "デコード完了！ ギャラリーで画像を確認できます。",
       decodeFailed: "デコード失敗: ",
       deviceFound: "RTL-SDR デバイス #{id} ({count}件検出)",
-      noHardware: "SDRハードウェア非検出 (シミュレーションモード)"
+      noHardware: "SDRハードウェア非検出 (シミュレーションモード)",
+      autoRecordingInProgress: "自動録音中 ({sat})... 残り {seconds} 秒",
+      recordingBusy: "録音が既に実行中です"
     },
     gallery: {
       title: "デコード済み APT 衛星画像ギャラリー",
