@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import * as echarts from 'echarts'
   import { i18n } from '../i18n.svelte.js'
-  import { Activity, Radio, Volume2, TrendingUp } from '@lucide/svelte'
+  import { Activity, TrendingUp, Clock, Sparkles } from '@lucide/svelte'
 
   let { signalHistory = [] } = $props()
 
@@ -137,11 +137,26 @@
           data: snrData,
           itemStyle: { color: '#10b981' },
           lineStyle: { width: 2, color: '#10b981' },
-          markPoint: {
+          markLine: {
+            silent: true,
+            symbol: 'none',
             data: [
-              { type: 'max', name: 'Max SNR', symbolSize: 35, itemStyle: { color: '#059669' } }
-            ],
-            label: { fontSize: 9, color: '#ffffff' }
+              {
+                yAxis: 10,
+                lineStyle: {
+                  color: 'rgba(16, 185, 129, 0.65)',
+                  type: 'dashed',
+                  width: 1.5
+                },
+                label: {
+                  show: true,
+                  position: 'insideEndTop',
+                  formatter: '10 dB (Lock)',
+                  color: '#10b981',
+                  fontSize: 10
+                }
+              }
+            ]
           }
         }
       ]
@@ -176,15 +191,35 @@
   })
 
   // Calculate statistics
-  let peakSignal = $derived(
-    signalHistory.length > 0 ? Math.max(...signalHistory.map(p => p.signal)) : -100
-  )
-  let avgNoise = $derived(
-    signalHistory.length > 0 ? (signalHistory.reduce((acc, p) => acc + p.noise, 0) / signalHistory.length) : -100
-  )
-  let maxSNR = $derived(
-    signalHistory.length > 0 ? Math.max(...signalHistory.map(p => p.snr)) : 0
-  )
+  let medianSNR = $derived.by(() => {
+    if (!signalHistory || signalHistory.length === 0) return 0
+    const snrs = signalHistory.map(p => p.snr).sort((a, b) => a - b)
+    const mid = Math.floor(snrs.length / 2)
+    return snrs.length % 2 !== 0 ? snrs[mid] : (snrs[mid - 1] + snrs[mid]) / 2
+  })
+
+  let goodSignalStats = $derived.by(() => {
+    if (!signalHistory || signalHistory.length === 0) {
+      return { count: 0, ratio: 0, durationSec: 0 }
+    }
+    const goodCount = signalHistory.filter(p => p.snr >= 10.0).length
+    const ratio = (goodCount / signalHistory.length) * 100
+    // signalHistory samples are recorded every second
+    return {
+      count: goodCount,
+      ratio: ratio,
+      durationSec: goodCount
+    }
+  })
+
+  let top10SNR = $derived.by(() => {
+    if (!signalHistory || signalHistory.length === 0) return 0
+    const snrs = signalHistory.map(p => p.snr).sort((a, b) => b - a)
+    const topCount = Math.max(1, Math.ceil(snrs.length * 0.1))
+    const topSlice = snrs.slice(0, topCount)
+    const sum = topSlice.reduce((acc, v) => acc + v, 0)
+    return sum / topCount
+  })
 </script>
 
 <div class="space-y-4">
@@ -199,30 +234,30 @@
       <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
         <div>
           <span class="text-[10px] text-slate-400 uppercase font-semibold block flex items-center gap-1">
-            <Radio class="w-3 h-3 text-cyan-400" />
-            {i18n.t('gallery.signalLevel')} (Peak)
-          </span>
-          <span class="text-sm font-bold text-cyan-300 font-mono mt-0.5 block">{peakSignal.toFixed(1)} <span class="text-[10px] font-normal text-slate-400">dBFS</span></span>
-        </div>
-      </div>
-
-      <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
-        <div>
-          <span class="text-[10px] text-slate-400 uppercase font-semibold block flex items-center gap-1">
-            <Volume2 class="w-3 h-3 text-rose-400" />
-            {i18n.t('gallery.noiseLevel')} (Avg)
-          </span>
-          <span class="text-sm font-bold text-rose-300 font-mono mt-0.5 block">{avgNoise.toFixed(1)} <span class="text-[10px] font-normal text-slate-400">dBFS</span></span>
-        </div>
-      </div>
-
-      <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
-        <div>
-          <span class="text-[10px] text-slate-400 uppercase font-semibold block flex items-center gap-1">
             <TrendingUp class="w-3 h-3 text-emerald-400" />
-            {i18n.t('gallery.snr')} (Max)
+            {i18n.t('gallery.medianSNR')}
           </span>
-          <span class="text-sm font-bold text-emerald-400 font-mono mt-0.5 block">+{maxSNR.toFixed(1)} <span class="text-[10px] font-normal text-slate-400">dB</span></span>
+          <span class="text-sm font-bold text-emerald-400 font-mono mt-0.5 block">+{medianSNR.toFixed(1)} <span class="text-[10px] font-normal text-slate-400">dB</span></span>
+        </div>
+      </div>
+
+      <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+        <div>
+          <span class="text-[10px] text-slate-400 uppercase font-semibold block flex items-center gap-1">
+            <Clock class="w-3 h-3 text-cyan-400" />
+            {i18n.t('gallery.goodDuration')}
+          </span>
+          <span class="text-sm font-bold text-cyan-300 font-mono mt-0.5 block">{formatTime(goodSignalStats.durationSec)} <span class="text-[10px] font-normal text-slate-400">({goodSignalStats.ratio.toFixed(0)}%)</span></span>
+        </div>
+      </div>
+
+      <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+        <div>
+          <span class="text-[10px] text-slate-400 uppercase font-semibold block flex items-center gap-1">
+            <Sparkles class="w-3 h-3 text-amber-400" />
+            {i18n.t('gallery.top10SNR')}
+          </span>
+          <span class="text-sm font-bold text-amber-300 font-mono mt-0.5 block">+{top10SNR.toFixed(1)} <span class="text-[10px] font-normal text-slate-400">dB</span></span>
         </div>
       </div>
     </div>

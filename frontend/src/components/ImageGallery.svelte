@@ -40,46 +40,130 @@
   }
 
   function getSignalStatus(rec) {
-    if (!rec || rec.avg_rssi === undefined || rec.avg_rssi === 0 || rec.avg_rssi === -100) {
+    if (!rec) {
       return {
         level: 'unknown',
         label: i18n.t('gallery.signalUnknown'),
         badgeClass: 'bg-slate-800/80 text-slate-400 border-slate-700/60',
         bars: 0,
         barBg: 'bg-slate-600',
-        rssiText: 'N/A'
+        rssiText: 'N/A',
+        detailText: 'N/A'
       }
     }
+
+    const history = rec.signal_history || []
+    if (history.length > 0) {
+      // 1. Median SNR
+      const snrs = history.map(p => p.snr).sort((a, b) => a - b)
+      const mid = Math.floor(snrs.length / 2)
+      const medianSNR = snrs.length % 2 !== 0 ? snrs[mid] : (snrs[mid - 1] + snrs[mid]) / 2
+
+      // 2. Good duration (SNR >= 10dB)
+      const goodCount = history.filter(p => p.snr >= 10.0).length
+      const goodRatio = (goodCount / history.length) * 100
+
+      // 3. Top 10% SNR
+      const snrsDesc = [...snrs].reverse()
+      const topCount = Math.max(1, Math.ceil(snrsDesc.length * 0.1))
+      const top10SNR = snrsDesc.slice(0, topCount).reduce((a, b) => a + b, 0) / topCount
+
+      const goodPercent = `${goodRatio.toFixed(0)}%`
+      const detailText = `SNR +${medianSNR.toFixed(1)}dB (${i18n.t('gallery.goodDuration').split(' ')[0]} ${goodPercent})`
+
+      // 良好 (Excellent): 良好受信時間が40%以上 かつ 中央値SNR 8dB以上
+      if (goodRatio >= 40 && medianSNR >= 8.0) {
+        return {
+          level: 'excellent',
+          label: i18n.t('gallery.signalExcellent'),
+          badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+          bars: 4,
+          barBg: 'bg-emerald-400',
+          rssiText: detailText,
+          detailText
+        }
+      // 普通 (Good): 良好受信時間が20%以上
+      } else if (goodRatio >= 20) {
+        return {
+          level: 'good',
+          label: i18n.t('gallery.signalGood'),
+          badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+          bars: 3,
+          barBg: 'bg-cyan-400',
+          rssiText: detailText,
+          detailText
+        }
+      // 可 (Fair): 良好受信時間が10%以上 (1分以上の有効受信があり一部画像が見える)
+      } else if (goodRatio >= 10) {
+        return {
+          level: 'fair',
+          label: i18n.t('gallery.signalFair'),
+          badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+          bars: 2,
+          barBg: 'bg-amber-400',
+          rssiText: detailText,
+          detailText
+        }
+      // 弱 (Weak): 良好受信時間が10%未満 (ほぼ全編砂嵐・復調不可)
+      } else {
+        return {
+          level: 'weak',
+          label: i18n.t('gallery.signalWeak'),
+          badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+          bars: 1,
+          barBg: 'bg-rose-400',
+          rssiText: detailText,
+          detailText
+        }
+      }
+    }
+
+    // Fallback: when signal_history is not available, use RSSI
+    if (rec.avg_rssi === undefined || rec.avg_rssi === 0 || rec.avg_rssi === -100) {
+      return {
+        level: 'unknown',
+        label: i18n.t('gallery.signalUnknown'),
+        badgeClass: 'bg-slate-800/80 text-slate-400 border-slate-700/60',
+        bars: 0,
+        barBg: 'bg-slate-600',
+        rssiText: 'N/A',
+        detailText: 'N/A'
+      }
+    }
+
     const rssi = rec.avg_rssi
     const peak = rec.peak_rssi
     const rssiText = peak ? `${rssi.toFixed(1)} dBFS (Peak ${peak.toFixed(1)})` : `${rssi.toFixed(1)} dBFS`
 
-    if (rssi >= -25) {
+    if (rssi >= -20 && peak >= -12) {
       return {
         level: 'excellent',
         label: i18n.t('gallery.signalExcellent'),
         badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
         bars: 4,
         barBg: 'bg-emerald-400',
-        rssiText
+        rssiText,
+        detailText: rssiText
       }
-    } else if (rssi >= -35) {
+    } else if (rssi >= -28) {
       return {
         level: 'good',
         label: i18n.t('gallery.signalGood'),
         badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
         bars: 3,
         barBg: 'bg-cyan-400',
-        rssiText
+        rssiText,
+        detailText: rssiText
       }
-    } else if (rssi >= -45) {
+    } else if (rssi >= -36) {
       return {
         level: 'fair',
         label: i18n.t('gallery.signalFair'),
         badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
         bars: 2,
         barBg: 'bg-amber-400',
-        rssiText
+        rssiText,
+        detailText: rssiText
       }
     } else {
       return {
@@ -88,7 +172,8 @@
         badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
         bars: 1,
         barBg: 'bg-rose-400',
-        rssiText
+        rssiText,
+        detailText: rssiText
       }
     }
   }
@@ -257,9 +342,9 @@
               </div>
 
               <div class="flex items-center gap-1.5">
-                {#if rec.avg_rssi !== undefined && rec.avg_rssi !== 0 && rec.avg_rssi !== -100}
+                {#if (rec.signal_history && rec.signal_history.length > 0) || (rec.avg_rssi !== undefined && rec.avg_rssi !== 0 && rec.avg_rssi !== -100)}
                   {@const sig = getSignalStatus(rec)}
-                  <span class="px-1.5 py-1 rounded-lg border text-[10px] font-medium flex items-center gap-1 {sig.badgeClass}" title={`RSSI: ${sig.rssiText}`}>
+                  <span class="px-1.5 py-1 rounded-lg border text-[10px] font-medium flex items-center gap-1 {sig.badgeClass}" title={`${i18n.t('gallery.signalLabel')} ${sig.label} - ${sig.detailText}`}>
                     <div class="inline-flex items-end gap-0.5 h-2.5">
                       <span class="w-0.5 rounded-xs h-[30%] {sig.bars >= 1 ? sig.barBg : 'bg-slate-700/60'}"></span>
                       <span class="w-0.5 rounded-xs h-[50%] {sig.bars >= 2 ? sig.barBg : 'bg-slate-700/60'}"></span>
@@ -311,7 +396,7 @@
                   </div>
                   <span>{i18n.t('gallery.signalLabel')} <b>{selectedSignal.label}</b></span>
                   {#if selectedSignal.level !== 'unknown'}
-                    <span class="font-mono opacity-80 text-[10px]">({selectedSignal.rssiText})</span>
+                    <span class="font-mono opacity-80 text-[10px]">({selectedSignal.detailText})</span>
                   {/if}
                 </span>
               </div>
