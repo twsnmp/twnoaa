@@ -1,13 +1,14 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Radio, Sliders, Play, Square, Disc, AlertCircle, Cpu } from '@lucide/svelte'
+  import { Radio, Sliders, Play, Square, Disc, AlertCircle, Cpu, Zap } from '@lucide/svelte'
 
   let { initialFreq = 137100000, initialSat = 'NOAA 19', onDecoded = () => {} } = $props()
 
   let centerFreq = $state(initialFreq)
   let tunerGain = $state(400)
   let autoGain = $state(false)
+  let biasTee = $state(false)
   let forceSim = $state(false)
 
   let sdrInfo = $state({ count: 0, name: 'Scanning...', is_present: false })
@@ -49,6 +50,7 @@
         if (cfg) {
           if (cfg.tuner_gain !== undefined) tunerGain = cfg.tuner_gain
           if (cfg.tuner_gain_auto !== undefined) autoGain = cfg.tuner_gain_auto
+          if (cfg.bias_tee !== undefined) biasTee = cfg.bias_tee
         }
       } catch (err) {
         console.error("Failed to load config:", err)
@@ -86,6 +88,16 @@
         await window.go.main.App.SetSDRCenterFreq(Number(centerFreq))
       } catch (err) {
         console.error("Failed to set SDR frequency:", err)
+      }
+    }
+  }
+
+  async function handleBiasTeeChange() {
+    if (window.go?.main?.App) {
+      try {
+        await window.go.main.App.SetSDRBiasTee(biasTee)
+      } catch (err) {
+        console.error("Failed to set SDR Bias-Tee:", err)
       }
     }
   }
@@ -197,7 +209,9 @@
 
     if (window.runtime?.EventsOn) {
       window.runtime.EventsOn('sdr_spectrum', (bins) => {
-        drawWaterfall(bins)
+        if (isStreaming) {
+          drawWaterfall(bins)
+        }
       })
 
       window.runtime.EventsOn('auto_record_started', (data) => {
@@ -233,6 +247,13 @@
 
   onDestroy(() => {
     clearRecordTimer()
+    if (window.runtime?.EventsOff) {
+      window.runtime.EventsOff('sdr_spectrum')
+      window.runtime.EventsOff('auto_record_started')
+      window.runtime.EventsOff('auto_record_ended')
+      window.runtime.EventsOff('decode_complete')
+      window.runtime.EventsOff('decode_error')
+    }
     if (isStreaming && window.go?.main?.App) {
       window.go.main.App.StopSDR()
     }
@@ -289,6 +310,14 @@
     </div>
 
     <div class="flex items-center gap-3">
+      <label class="flex items-center gap-2 text-xs font-semibold {biasTee ? 'text-amber-300 font-bold' : 'text-slate-400'} cursor-pointer bg-slate-950 px-3 py-1.5 rounded-xl border {biasTee ? 'border-amber-500/50 bg-amber-500/10' : 'border-slate-800'} transition-all">
+        <input type="checkbox" bind:checked={biasTee} onchange={handleBiasTeeChange} class="rounded bg-slate-800 border-slate-700 text-amber-500 focus:ring-amber-500" />
+        <span class="flex items-center gap-1">
+          <Zap class="w-3.5 h-3.5 {biasTee ? 'text-amber-400 fill-amber-400' : 'text-slate-500'}" />
+          {i18n.t('sdr.biasTee')}
+        </span>
+      </label>
+
       <label class="flex items-center gap-2 text-xs font-semibold text-slate-300 cursor-pointer">
         <input type="checkbox" bind:checked={forceSim} class="rounded bg-slate-800 border-slate-700 text-cyan-500 focus:ring-cyan-500" />
         {i18n.t('sdr.forceSim')}

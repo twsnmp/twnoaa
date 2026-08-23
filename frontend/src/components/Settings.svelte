@@ -20,6 +20,7 @@
     auto_record_duration: 30,
     tuner_gain: 400,
     tuner_gain_auto: false,
+    bias_tee: false,
     sample_rate: 2080000
   })
 
@@ -219,6 +220,19 @@
         <div>
           <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.autoGainSetting')}</span>
           <span class="text-[10px] text-slate-500 block">{i18n.t('settings.autoGainSettingDesc')}</span>
+        </div>
+      </label>
+
+      <label for="bias-tee-checkbox" class="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
+        <input
+          id="bias-tee-checkbox"
+          type="checkbox"
+          bind:checked={cfg.bias_tee}
+          class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-cyan-500"
+        />
+        <div>
+          <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.biasTee')}</span>
+          <span class="text-[10px] text-slate-500 block">{i18n.t('settings.biasTeeDesc')}</span>
         </div>
       </label>
 

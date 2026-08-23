@@ -19,15 +19,16 @@ type DeviceInfo struct {
 }
 
 type SDR struct {
-	mu             sync.Mutex
-	device         *rtl.Context
-	centerFreq     int
-	sampleRate     int
-	gain           int
-	autoGain       bool
-	isStreaming    bool
-	simulationMode bool
-	stopChan       chan struct{}
+	mu              sync.Mutex
+	device          *rtl.Context
+	centerFreq      int
+	sampleRate      int
+	gain            int
+	autoGain        bool
+	biasTee         bool
+	isStreaming     bool
+	simulationMode  bool
+	stopChan        chan struct{}
 	dataSubscribers []chan []byte
 }
 
@@ -37,6 +38,7 @@ func NewSDR() *SDR {
 		sampleRate:      2080000,
 		gain:            400,
 		autoGain:        false,
+		biasTee:         false,
 		simulationMode:  false,
 		dataSubscribers: make([]chan []byte, 0),
 	}
@@ -78,7 +80,7 @@ func (s *SDR) Unsubscribe(ch chan []byte) {
 	}
 }
 
-func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) error {
+func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, biasTee, forceSim bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -90,6 +92,7 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) e
 	s.sampleRate = sampleRate
 	s.gain = gain
 	s.autoGain = autoGain
+	s.biasTee = biasTee
 
 	devCount := rtl.GetDeviceCount()
 	if devCount == 0 || forceSim {
@@ -110,8 +113,16 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, forceSim bool) e
 				dev.SetTunerGain(gain)
 			}
 			_ = dev.SetOffsetTuning(true)
+
+			// Configure Bias-Tee (4.5V coaxial power for active LNA/antennas)
+			if err := dev.SetBiasTee(biasTee); err != nil {
+				logger.Warnf("SDR", "Failed to configure Bias-Tee (enable=%v): %v", biasTee, err)
+			} else {
+				logger.Infof("SDR", "Bias-Tee (4.5V coaxial power) configured: %v", biasTee)
+			}
+
 			dev.ResetBuffer()
-			logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, offset_tuning=true", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain)
+			logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, bias_tee=%v, offset_tuning=true", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain, biasTee)
 		}
 	}
 
@@ -170,6 +181,23 @@ func (s *SDR) SetGain(gain int, autoGain bool) error {
 	return nil
 }
 
+func (s *SDR) SetBiasTee(enable bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.biasTee = enable
+
+	if s.device != nil && s.isStreaming && !s.simulationMode {
+		err := s.device.SetBiasTee(enable)
+		if err != nil {
+			logger.Warnf("SDR", "Failed to update Bias-Tee to %v: %v", enable, err)
+			return err
+		}
+		logger.Infof("SDR", "Bias-Tee updated dynamically: %v", enable)
+	}
+	return nil
+}
+
 func (s *SDR) StopStream() {
 	s.mu.Lock()
 	if !s.isStreaming {
@@ -182,6 +210,10 @@ func (s *SDR) StopStream() {
 		_ = s.device.Close()
 		s.device = nil
 	}
+	for _, ch := range s.dataSubscribers {
+		close(ch)
+	}
+	s.dataSubscribers = make([]chan []byte, 0)
 	s.mu.Unlock()
 	logger.Infof("SDR", "SDR stream stopped")
 }

@@ -152,6 +152,9 @@ func (a *App) SaveConfig(cfg datastore.Config) string {
 	if err := a.store.UpdateConfig(cfg); err != nil {
 		return fmt.Sprintf("Error saving config: %v", err)
 	}
+	if a.sdrService != nil {
+		_ = a.sdrService.SetBiasTee(cfg.BiasTee)
+	}
 	return "Config saved successfully"
 }
 
@@ -191,7 +194,8 @@ func (a *App) GetSDRDeviceInfo() sdr.DeviceInfo {
 }
 
 func (a *App) StartSDR(freq, sampleRate, gain int, autoGain, forceSim bool) string {
-	err := a.sdrService.StartStream(freq, sampleRate, gain, autoGain, forceSim)
+	cfg := a.store.GetConfig()
+	err := a.sdrService.StartStream(freq, sampleRate, gain, autoGain, cfg.BiasTee, forceSim)
 	if err != nil {
 		return fmt.Sprintf("Failed to start SDR: %v", err)
 	}
@@ -241,6 +245,17 @@ func (a *App) SetSDRGain(gain int, autoGain bool) string {
 	return "SDR gain updated"
 }
 
+func (a *App) SetSDRBiasTee(enable bool) string {
+	err := a.sdrService.SetBiasTee(enable)
+	if err != nil {
+		return fmt.Sprintf("Failed to set SDR Bias-Tee: %v", err)
+	}
+	cfg := a.store.GetConfig()
+	cfg.BiasTee = enable
+	_ = a.store.UpdateConfig(cfg)
+	return "SDR Bias-Tee updated"
+}
+
 func (a *App) StopSDR() string {
 	a.sdrService.StopStream()
 	return "SDR stream stopped"
@@ -264,10 +279,19 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 	a.recMu.Unlock()
 
 	go func() {
+		cfg := a.store.GetConfig()
+		wasStreaming := a.sdrService.IsStreaming()
+
 		defer func() {
 			a.recMu.Lock()
 			a.recording = false
 			a.recMu.Unlock()
+
+			// If SDR was not streaming before recording, stop it now
+			if !wasStreaming {
+				a.sdrService.StopStream()
+			}
+
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "auto_record_ended", map[string]interface{}{
 					"sat_name": satName,
@@ -275,9 +299,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			}
 		}()
 
-		cfg := a.store.GetConfig()
-		if !a.sdrService.IsStreaming() {
-			_ = a.sdrService.StartStream(freq, cfg.SampleRate, gain, autoGain, cfg.SimulationMode)
+		if !wasStreaming {
+			_ = a.sdrService.StartStream(freq, cfg.SampleRate, gain, autoGain, cfg.BiasTee, cfg.SimulationMode)
 		} else {
 			_ = a.sdrService.SetCenterFreq(freq)
 			_ = a.sdrService.SetGain(gain, autoGain)

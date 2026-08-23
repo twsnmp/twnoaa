@@ -40,6 +40,7 @@ type Config struct {
 	SampleRate         int  `json:"sample_rate"`
 	TunerGain          int  `json:"tuner_gain"`
 	TunerGainAuto      bool `json:"tuner_gain_auto"`
+	BiasTee            bool `json:"bias_tee"`
 	SimulationMode     bool `json:"simulation_mode"`
 	AutoRecord         bool `json:"auto_record"`
 	AutoRecordDuration int  `json:"auto_record_duration"`
@@ -148,6 +149,7 @@ func (s *Store) initBuckets(baseDir string) error {
 				SampleRate:         2080000,
 				TunerGain:          400,
 				TunerGainAuto:      false,
+				BiasTee:            false,
 				SimulationMode:     false, // Default to hardware mode (falls back automatically if no hardware)
 				AutoRecord:         false, // Default OFF
 				AutoRecordDuration: 30,
@@ -192,6 +194,7 @@ func (s *Store) GetConfig() Config {
 		SampleRate:         2080000,
 		TunerGain:          380, // 38.0 dB optimal gain for dipole antenna without external LNA
 		TunerGainAuto:      false,
+		BiasTee:            false,
 		SimulationMode:     false,
 		AutoRecord:         false,
 		AutoRecordDuration: 30,
