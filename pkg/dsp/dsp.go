@@ -109,8 +109,8 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 		}
 	}
 
-	// 2. FM Quadrature Demodulation at 104 kHz rate
-	scaleFactor := float64(actualIQRate) / (2.0 * math.Pi * 17000.0) // ±17 kHz max deviation to ±1.0 PCM
+	// 2. FM Quadrature Demodulation at 104 kHz rate (normalized [-1.0, +1.0] across [-pi, +pi])
+	scaleFactor := 1.0 / math.Pi
 	audio104k := make([]float64, len(decimatedIQ))
 
 	for i, sample := range decimatedIQ {
