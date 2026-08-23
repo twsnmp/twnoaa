@@ -34,6 +34,9 @@
     const noiseData = signalHistory.map(p => p.noise)
     const snrData = signalHistory.map(p => p.snr)
 
+    const maxRecordedSnr = snrData.length > 0 ? Math.max(...snrData) : 0
+    const snrAxisMax = maxRecordedSnr > 25 ? Math.ceil(maxRecordedSnr / 5) * 5 : 25
+
     const option = {
       backgroundColor: 'transparent',
       tooltip: {
@@ -83,6 +86,9 @@
           type: 'value',
           name: 'dBFS',
           nameTextStyle: { color: '#64748b', fontSize: 10 },
+          min: -50,
+          max: 0,
+          interval: 10,
           axisLine: { show: false },
           axisLabel: { color: '#94a3b8', fontSize: 10, formatter: '{value}' },
           splitLine: { lineStyle: { color: '#1e293b', type: 'dashed' } }
@@ -92,6 +98,8 @@
           name: 'SNR (dB)',
           nameTextStyle: { color: '#10b981', fontSize: 10 },
           min: 0,
+          max: snrAxisMax,
+          interval: 5,
           axisLine: { show: false },
           axisLabel: { color: '#10b981', fontSize: 10, formatter: '{value} dB' },
           splitLine: { show: false }

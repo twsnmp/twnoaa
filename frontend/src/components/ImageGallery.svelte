@@ -1,24 +1,75 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload, Music, Volume2, PlayCircle } from '@lucide/svelte'
+  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload, Music, Volume2, PlayCircle, Layers, CheckSquare, Square, Filter } from '@lucide/svelte'
   import SignalChart from './SignalChart.svelte'
+  import MultiSignalChart from './MultiSignalChart.svelte'
   import AudioPlayer from './AudioPlayer.svelte'
 
   let { onRunAI = () => {} } = $props()
 
   let records = $state([])
   let selectedRecord = $state(null)
+  let selectedRecordIds = $state([])
   let activeChannel = $state('full')
   let currentImageBase64 = $state('')
   let recordToDelete = $state(null)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
-  let detailViewTab = $state('image') // 'image' | 'signal' | 'audio'
+  let detailViewTab = $state('image') // 'image' | 'signal' | 'compare' | 'audio'
   let decodingWav = $state(false)
   let wavStatusMsg = $state('')
   let standaloneWavPath = $state('')
   let showStandaloneAudioModal = $state(false)
+
+  let selectedRecordsList = $derived(
+    records.filter(r => selectedRecordIds.includes(r.id))
+  )
+
+  let uniqueSatsWithData = $derived(
+    [...new Set(records.filter(r => r.signal_history && r.signal_history.length > 0).map(r => r.sat_name))]
+  )
+
+  function toggleRecordSelection(id, e) {
+    if (e) e.stopPropagation()
+    if (selectedRecordIds.includes(id)) {
+      selectedRecordIds = selectedRecordIds.filter(x => x !== id)
+    } else {
+      selectedRecordIds = [...selectedRecordIds, id]
+    }
+  }
+
+  function handleDeselectRecord(id) {
+    selectedRecordIds = selectedRecordIds.filter(x => x !== id)
+  }
+
+  function selectRecent5() {
+    const withData = records.filter(r => r.signal_history && r.signal_history.length > 0)
+    selectedRecordIds = withData.slice(0, 5).map(r => r.id)
+    detailViewTab = 'compare'
+  }
+
+  function selectHighElevation() {
+    const withData = records.filter(r => r.signal_history && r.signal_history.length > 0 && r.max_elevation >= 45)
+    selectedRecordIds = withData.map(r => r.id)
+    detailViewTab = 'compare'
+  }
+
+  function selectBySat(satName) {
+    const withData = records.filter(r => r.sat_name === satName && r.signal_history && r.signal_history.length > 0)
+    selectedRecordIds = withData.map(r => r.id)
+    detailViewTab = 'compare'
+  }
+
+  function selectAllWithData() {
+    const withData = records.filter(r => r.signal_history && r.signal_history.length > 0)
+    selectedRecordIds = withData.map(r => r.id)
+    detailViewTab = 'compare'
+  }
+
+  function clearSelection() {
+    selectedRecordIds = []
+  }
 
   async function handleOpenAndPlayWAV() {
     if (window.go?.main?.App?.SelectWAVFile) {
@@ -206,8 +257,15 @@
           if (!selectedRecord || !records.find(r => r.id === selectedRecord.id)) {
             selectedRecord = records[0]
           }
+          if (selectedRecordIds.length === 0) {
+            const withData = records.filter(r => r.signal_history && r.signal_history.length > 0)
+            selectedRecordIds = withData.slice(0, Math.min(3, withData.length)).map(r => r.id)
+          } else {
+            selectedRecordIds = selectedRecordIds.filter(id => records.some(r => r.id === id))
+          }
         } else {
           selectedRecord = null
+          selectedRecordIds = []
         }
       } catch (err) {
         console.error("Failed to load pass records:", err)
@@ -353,29 +411,113 @@
     </div>
   {:else}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
-        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">{i18n.t('gallery.decodedPasses')} ({records.length})</h3>
+      <!-- Decoded Passes List Column -->
+      <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3 flex flex-col max-h-[calc(100vh-160px)]">
+        <div class="flex items-center justify-between gap-2 pb-1 border-b border-slate-800/80">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            {i18n.t('gallery.decodedPasses')} <span class="font-mono text-slate-300">({records.length})</span>
+          </h3>
 
-        <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+          <button
+            type="button"
+            onclick={() => {
+              detailViewTab = 'compare'
+              if (selectedRecordIds.length === 0 && selectedRecord) {
+                selectedRecordIds = [selectedRecord.id]
+              }
+            }}
+            class="px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+            title={i18n.t('gallery.compareSignals')}
+          >
+            <Layers class="w-3.5 h-3.5 text-cyan-400" />
+            <span>{i18n.t('gallery.multiCompareTab')}</span>
+            {#if selectedRecordIds.length > 0}
+              <span class="px-1 py-0.2 text-[10px] font-mono rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/30">
+                {selectedRecordIds.length}
+              </span>
+            {/if}
+          </button>
+        </div>
+
+        <!-- Quick Selection Presets Bar -->
+        <div class="flex flex-wrap items-center gap-1.5 py-1 text-[11px] bg-slate-950/60 p-2 rounded-xl border border-slate-800/70">
+          <span class="text-[10px] text-slate-400 font-semibold flex items-center gap-1 mr-0.5">
+            <Filter class="w-3 h-3 text-cyan-400" />
+          </span>
+          <button
+            type="button"
+            onclick={selectRecent5}
+            class="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-700/80 rounded-md text-[10px] font-medium transition-colors cursor-pointer"
+          >
+            {i18n.t('gallery.presetRecent5')}
+          </button>
+          <button
+            type="button"
+            onclick={selectHighElevation}
+            class="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-700/80 rounded-md text-[10px] font-medium transition-colors cursor-pointer"
+          >
+            {i18n.t('gallery.presetHighElev')}
+          </button>
+          {#each uniqueSatsWithData as sat}
+            <button
+              type="button"
+              onclick={() => selectBySat(sat)}
+              class="px-2 py-0.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-700/80 rounded-md text-[10px] font-medium transition-colors cursor-pointer"
+            >
+              {sat}
+            </button>
+          {/each}
+          <div class="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onclick={selectAllWithData}
+              class="px-1.5 py-0.5 text-slate-400 hover:text-slate-200 text-[10px] transition-colors cursor-pointer"
+            >
+              {i18n.t('gallery.selectAll')}
+            </button>
+            <span class="text-slate-600">|</span>
+            <button
+              type="button"
+              onclick={clearSelection}
+              class="px-1.5 py-0.5 text-slate-400 hover:text-rose-400 text-[10px] transition-colors cursor-pointer"
+            >
+              {i18n.t('gallery.clearSelection')}
+            </button>
+          </div>
+        </div>
+
+        <!-- Pass Items List -->
+        <div class="space-y-2 flex-1 overflow-y-auto pr-1">
           {#each records as rec}
             <div
               role="button"
               tabindex="0"
               onclick={() => selectedRecord = rec}
               onkeydown={(e) => e.key === 'Enter' && (selectedRecord = rec)}
-              class="w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between group cursor-pointer {selectedRecord?.id === rec.id ? 'bg-cyan-950/40 border-cyan-500/50 text-slate-100' : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'}"
+              class="w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between gap-2.5 group cursor-pointer {selectedRecord?.id === rec.id ? 'bg-cyan-950/40 border-cyan-500/50 text-slate-100 ring-1 ring-cyan-500/30' : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'}"
             >
-              <div>
-                <span class="text-xs font-bold text-slate-200 block">{rec.sat_name}</span>
-                <div class="flex items-center gap-1.5 text-[10px] text-slate-400">
-                  <span class="text-cyan-400 font-mono">{(rec.frequency / 1e6).toFixed(4)} MHz</span>
-                  <span>•</span>
-                  <span>{rec.max_elevation}°{rec.max_elevation_az ? ` (${rec.max_elevation_az}°)` : ''}</span>
+              <div class="flex items-center gap-2.5 min-w-0">
+                <!-- Checkbox for multi-pass selection -->
+                <input
+                  type="checkbox"
+                  checked={selectedRecordIds.includes(rec.id)}
+                  onclick={(e) => toggleRecordSelection(rec.id, e)}
+                  class="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/30 focus:ring-offset-slate-950 cursor-pointer shrink-0"
+                  title="Select for multi-pass comparison"
+                />
+
+                <div class="min-w-0">
+                  <span class="text-xs font-bold text-slate-200 block truncate">{rec.sat_name}</span>
+                  <div class="flex items-center gap-1.5 text-[10px] text-slate-400 truncate">
+                    <span class="text-cyan-400 font-mono">{(rec.frequency / 1e6).toFixed(4)} MHz</span>
+                    <span>•</span>
+                    <span>{rec.max_elevation}°{rec.max_elevation_az ? ` (${rec.max_elevation_az}°)` : ''}</span>
+                  </div>
+                  <span class="text-[10px] text-slate-500 block mt-0.5 font-mono">{new Date(rec.timestamp).toLocaleString()}</span>
                 </div>
-                <span class="text-[10px] text-slate-500 block mt-0.5">{new Date(rec.timestamp).toLocaleString()}</span>
               </div>
 
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-1.5 shrink-0">
                 {#if rec.audio_path}
                   <span class="p-1 bg-cyan-500/10 text-cyan-400 rounded-md border border-cyan-500/20" title="WAV Audio Available">
                     <Music class="w-3 h-3" />
@@ -403,7 +545,7 @@
                 <button
                   type="button"
                   onclick={(e) => promptDelete(rec, e)}
-                  class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all"
+                  class="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all cursor-pointer"
                   title={i18n.t('gallery.delete')}
                 >
                   <Trash2 class="w-3.5 h-3.5" />
@@ -414,6 +556,7 @@
         </div>
       </div>
 
+      <!-- Main Detail / Comparison Panel -->
       {#if selectedRecord}
         <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-3">
@@ -460,8 +603,20 @@
                   {i18n.t('gallery.signalHistoryTab')}
                 </button>
                 <button
+                  onclick={() => detailViewTab = 'compare'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'compare' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                >
+                  <Layers class="w-3.5 h-3.5" />
+                  {i18n.t('gallery.multiCompareTab')}
+                  {#if selectedRecordIds.length > 0}
+                    <span class="ml-0.5 px-1 py-0.2 rounded text-[10px] font-mono {detailViewTab === 'compare' ? 'bg-emerald-800 text-white' : 'bg-slate-800 text-cyan-300'}">
+                      {selectedRecordIds.length}
+                    </span>
+                  {/if}
+                </button>
+                <button
                   onclick={() => detailViewTab = 'audio'}
-                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'audio' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'audio' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
                 >
                   <Music class="w-3.5 h-3.5" />
                   {i18n.t('gallery.audioTab')}
@@ -528,8 +683,36 @@
               {/if}
             </div>
           {:else if detailViewTab === 'signal'}
+            <div class="space-y-3">
+              <div class="flex items-center justify-between px-1">
+                <span class="text-xs text-slate-400 flex items-center gap-1.5">
+                  <Activity class="w-4 h-4 text-emerald-400" />
+                  {i18n.t('gallery.signalChartTitle')}
+                </span>
+                <button
+                  type="button"
+                  onclick={() => {
+                    if (!selectedRecordIds.includes(selectedRecord.id)) {
+                      selectedRecordIds = [...selectedRecordIds, selectedRecord.id]
+                    }
+                    detailViewTab = 'compare'
+                  }}
+                  class="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-medium hover:underline cursor-pointer"
+                >
+                  <Layers class="w-3.5 h-3.5" />
+                  {i18n.t('gallery.multiCompareTab')}
+                </button>
+              </div>
+              <div class="bg-slate-950/60 rounded-xl border border-slate-800 p-4">
+                <SignalChart signalHistory={selectedRecord.signal_history || []} />
+              </div>
+            </div>
+          {:else if detailViewTab === 'compare'}
             <div class="bg-slate-950/60 rounded-xl border border-slate-800 p-4">
-              <SignalChart signalHistory={selectedRecord.signal_history || []} />
+              <MultiSignalChart
+                selectedRecords={selectedRecordsList.length > 0 ? selectedRecordsList : (selectedRecord ? [selectedRecord] : [])}
+                onDeselect={handleDeselectRecord}
+              />
             </div>
           {:else if detailViewTab === 'audio'}
             <div class="space-y-4">
