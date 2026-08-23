@@ -12,14 +12,17 @@ import (
 )
 
 type DSP struct {
-	sampleRate int
-	targetRate int
-	decimation int
-	prevSample complex128
-	iqLPFState complex128 // IQ low-pass filter state
-	iqDCI      float64    // Running DC estimate for I channel
-	iqDCQ      float64    // Running DC estimate for Q channel
-	dcState    float64    // Audio DC blocker state
+	sampleRate    int
+	targetRate    int
+	decimation    int
+	prevSample    complex128
+	iqLPFState    complex128 // IQ low-pass filter state
+	iqDCI         float64    // Running DC estimate for I channel
+	iqDCQ         float64    // Running DC estimate for Q channel
+	dcState       float64    // Audio DC blocker state
+	iqDecPhase    int        // Phase accumulator for IQ decimation
+	audioDecPhase int        // Phase accumulator for audio decimation
+	audioDecSum   float64    // Running sum for audio decimation boxcar filter
 }
 
 func NewDSP(sampleRate, targetAudioRate int) *DSP {
@@ -82,7 +85,7 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 	alpha := math.Exp(-2.0 * math.Pi * 40000.0 / float64(d.sampleRate))
 	oneMinusAlpha := 1.0 - alpha
 
-	decimatedIQ := make([]complex128, 0, len(iq)/iqDec)
+	decimatedIQ := make([]complex128, 0, (len(iq)+iqDec-1)/iqDec)
 	for i := 0; i < len(iq); i++ {
 		raw := iq[i]
 		r := real(raw)
@@ -99,7 +102,9 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 			imag(d.iqLPFState)*alpha+imag(cleanIQ)*oneMinusAlpha,
 		)
 
-		if i%iqDec == 0 {
+		d.iqDecPhase++
+		if d.iqDecPhase >= iqDec {
+			d.iqDecPhase = 0
 			decimatedIQ = append(decimatedIQ, d.iqLPFState)
 		}
 	}
@@ -130,23 +135,26 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 	}
 
 	// 3. Audio Decimation & DC Blocker
-	audioOut := make([]float64, 0, len(audio104k)/audioDec)
-	for i := 0; i+audioDec <= len(audio104k); i += audioDec {
-		var sum float64
-		for k := 0; k < audioDec; k++ {
-			sum += audio104k[i+k]
-		}
-		avg := sum / float64(audioDec)
-		acAudio := avg - d.dcState
-		d.dcState = d.dcState*0.995 + avg*0.005
+	audioOut := make([]float64, 0, (len(audio104k)+audioDec-1)/audioDec)
+	for i := 0; i < len(audio104k); i++ {
+		d.audioDecSum += audio104k[i]
+		d.audioDecPhase++
+		if d.audioDecPhase >= audioDec {
+			avg := d.audioDecSum / float64(audioDec)
+			d.audioDecSum = 0.0
+			d.audioDecPhase = 0
 
-		if acAudio > 1.0 {
-			acAudio = 1.0
+			acAudio := avg - d.dcState
+			d.dcState = d.dcState*0.995 + avg*0.005
+
+			if acAudio > 1.0 {
+				acAudio = 1.0
+			}
+			if acAudio < -1.0 {
+				acAudio = -1.0
+			}
+			audioOut = append(audioOut, acAudio)
 		}
-		if acAudio < -1.0 {
-			acAudio = -1.0
-		}
-		audioOut = append(audioOut, acAudio)
 	}
 
 	return audioOut

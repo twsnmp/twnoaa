@@ -39,19 +39,106 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 		return nil, fmt.Errorf("failed to create output directory %s: %w", outDir, err)
 	}
 
-	// 1. Extract AM envelope
+	// 1. Extract AM envelope using robust full-wave rectification + low-pass filter
 	envelope := extractEnvelope(samples, sampleRate)
 
-	// 2. Slice into 0.5s line chunks and resample to 2080 px TargetWidth
-	samplesPerLine := int(float64(sampleRate) * 0.5)
-	if samplesPerLine <= 0 {
-		samplesPerLine = 10400 // fallback for 20800 Hz
+	// 2. Line-by-line sync tracking (PLL-like alignment)
+	// Nominal samples per line (0.5 sec)
+	nominalLineSamples := int(float64(sampleRate) * 0.5)
+	if nominalLineSamples <= 0 {
+		nominalLineSamples = 10400
 	}
 
+	// Sync A pattern: 7 cycles of 1040 Hz square wave
+	// Period per cycle in audio samples = sampleRate / 1040 (e.g. 20 samples at 20800 Hz)
+	cycleSamples := float64(sampleRate) / 1040.0
+	syncLen := int(cycleSamples * 7.0)
+	if syncLen < 14 {
+		syncLen = 14
+	}
+	syncPattern := make([]float64, syncLen)
+	for c := 0; c < 7; c++ {
+		startC := int(float64(c) * cycleSamples)
+		midC := int((float64(c) + 0.5) * cycleSamples)
+		endC := int(float64(c+1) * cycleSamples)
+		if endC > syncLen {
+			endC = syncLen
+		}
+		for k := startC; k < midC && k < syncLen; k++ {
+			syncPattern[k] = 1.0
+		}
+		for k := midC; k < endC && k < syncLen; k++ {
+			syncPattern[k] = -1.0
+		}
+	}
+
+	// Find initial sync in the first 1 line window (nominalLineSamples)
+	bestInitPos := 0
+	maxInitMetric := -1e9
+	searchWindow := nominalLineSamples
+	if searchWindow > len(envelope)-syncLen {
+		searchWindow = len(envelope) - syncLen
+	}
+	for p := 0; p < searchWindow; p++ {
+		metric := 0.0
+		for k := 0; k < syncLen; k++ {
+			metric += envelope[p+k] * syncPattern[k]
+		}
+		if metric > maxInitMetric {
+			maxInitMetric = metric
+			bestInitPos = p
+		}
+	}
+	if maxInitMetric < 1.0 {
+		bestInitPos = 0
+	}
+
+	currentPos := bestInitPos
 	var rawFloatLines [][]float64
-	for i := 0; i+samplesPerLine <= len(envelope); i += samplesPerLine {
-		line := resampleLine(envelope[i:i+samplesPerLine], TargetWidth)
-		rawFloatLines = append(rawFloatLines, line)
+	searchRange := int(cycleSamples * 15) // ±15 cycles search range around expected next line
+
+	for currentPos < len(envelope) {
+		endPos := currentPos + nominalLineSamples
+		if endPos > len(envelope) {
+			// If at least 30% of a line remains, pad and include it as the final line
+			if len(envelope)-currentPos < nominalLineSamples/3 {
+				break
+			}
+			padded := make([]float64, nominalLineSamples)
+			copy(padded, envelope[currentPos:])
+			resampled := resampleLine(padded, TargetWidth)
+			rawFloatLines = append(rawFloatLines, resampled)
+			break
+		}
+
+		lineChunk := envelope[currentPos:endPos]
+		resampled := resampleLine(lineChunk, TargetWidth)
+		rawFloatLines = append(rawFloatLines, resampled)
+
+		expectedNext := currentPos + nominalLineSamples
+		bestNext := expectedNext
+		maxMetric := -1e9
+
+		for delta := -searchRange; delta <= searchRange; delta++ {
+			p := expectedNext + delta
+			if p < 0 || p+syncLen >= len(envelope) {
+				continue
+			}
+			metric := 0.0
+			for k := 0; k < syncLen; k++ {
+				metric += envelope[p+k] * syncPattern[k]
+			}
+			if metric > maxMetric {
+				maxMetric = metric
+				bestNext = p
+			}
+		}
+
+		if maxMetric > 1.5 {
+			currentPos = bestNext
+		} else {
+			currentPos = expectedNext
+		}
 	}
 
 	if len(rawFloatLines) == 0 {
@@ -59,20 +146,10 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 		return nil, fmt.Errorf("insufficient audio duration to decode APT image")
 	}
 
-	logger.Infof("DECODER", "Extracted %d APT image lines (target_width=%d px)", len(rawFloatLines), TargetWidth)
+	logger.Infof("DECODER", "Extracted %d APT image lines with line-by-line sync alignment", len(rawFloatLines))
 
-	// Robust float64 contrast normalization to stretch 1st-99th percentile across 0-255 uint8 range
-	rawLines := normalizeLines(rawFloatLines)
-
-	// 3. Find global Sync A pulse offset across column sums
-	globalOffset := findGlobalSyncOffset(rawLines)
-	logger.Infof("DECODER", "Global Sync A pulse offset alignment detected at column x=%d px", globalOffset)
-
-	// 4. Align all lines using global offset shift
-	alignedLines := make([][]uint8, len(rawLines))
-	for y := 0; y < len(rawLines); y++ {
-		alignedLines[y] = shiftLine(rawLines[y], globalOffset)
-	}
+	// Contrast normalization
+	alignedLines := normalizeLines(rawFloatLines)
 
 	// 5. Save full image (Channel A + B side-by-side)
 	fullPath := fmt.Sprintf("%s/%s_full.png", outDir, baseName)
@@ -91,14 +168,14 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 	_ = savePNG(chanAPath, chanALines)
 	_ = savePNG(chanBPath, chanBLines)
 
-	logger.Infof("DECODER", "APT decode completed successfully: lines=%d, sync_offset=%d, full_image=%s", len(alignedLines), globalOffset, fullPath)
+	logger.Infof("DECODER", "APT decode completed successfully: lines=%d, full_image=%s", len(alignedLines), fullPath)
 
 	return &DecodeResult{
 		FullImagePath: fullPath,
 		ChanAPath:     chanAPath,
 		ChanBPath:     chanBPath,
 		LineCount:     len(alignedLines),
-		SyncOffset:    globalOffset,
+		SyncOffset:    bestInitPos,
 	}, nil
 }
 
@@ -107,80 +184,24 @@ func extractEnvelope(samples []float64, sampleRate int) []float64 {
 	if sr <= 0 {
 		sr = 20800.0
 	}
-	carrierFreq := 2400.0
-	dt := 2.0 * math.Pi * carrierFreq / sr
+
+	// 2nd-order cascaded IIR low-pass filter (~1600 Hz cutoff for AM envelope detection)
+	cutoff := 1600.0
+	alpha := math.Exp(-2.0 * math.Pi * cutoff / sr)
+	oneMinusAlpha := 1.0 - alpha
 
 	env := make([]float64, len(samples))
-	iSamples := make([]float64, len(samples))
-	qSamples := make([]float64, len(samples))
+	stage1 := 0.0
+	stage2 := 0.0
 
-	// 1. Quadrature mixing with 2400 Hz subcarrier to downconvert 2400 Hz to DC
-	for n := 0; n < len(samples); n++ {
-		angle := float64(n) * dt
-		iSamples[n] = samples[n] * math.Cos(angle)
-		qSamples[n] = samples[n] * math.Sin(angle)
-	}
-
-	// 2. Low-pass filter (moving average) to reject out-of-band audio noise and 4800Hz harmonics
-	// Window size scaled to sample rate (~1 pixel width at TargetWidth=2080, e.g. 5 samples at 20800 Hz => window=2)
-	window := int(sr / 8320.0)
-	if window < 1 {
-		window = 1
-	}
-	for n := 0; n < len(samples); n++ {
-		sumI := 0.0
-		sumQ := 0.0
-		count := 0
-		for w := -window; w <= window; w++ {
-			idx := n + w
-			if idx >= 0 && idx < len(samples) {
-				sumI += iSamples[idx]
-				sumQ += qSamples[idx]
-				count++
-			}
-		}
-		avgI := sumI / float64(count)
-		avgQ := sumQ / float64(count)
-		env[n] = math.Sqrt(avgI*avgI + avgQ*avgQ)
+	for i := 0; i < len(samples); i++ {
+		absS := math.Abs(samples[i])
+		stage1 = stage1*alpha + absS*oneMinusAlpha
+		stage2 = stage2*alpha + stage1*oneMinusAlpha
+		env[i] = stage2
 	}
 
 	return env
-}
-
-func findGlobalSyncOffset(lines [][]uint8) int {
-	if len(lines) == 0 {
-		return 0
-	}
-
-	columnSums := make([]float64, TargetWidth)
-	for y := 0; y < len(lines); y++ {
-		for x := 0; x < TargetWidth; x++ {
-			columnSums[x] += float64(lines[y][x])
-		}
-	}
-
-	bestX := 0
-	maxDiff := -1e9
-
-	// Sync A consists of 7 cycles of 1040 Hz square wave.
-	// At 2080 px per 0.5s line, each 1040 Hz cycle is 4 px wide (2 px HIGH, 2 px LOW).
-	// Search in the first half of the line (Channel A region) where Sync A is located.
-	for x := 0; x < TargetWidth/2; x++ {
-		diff := 0.0
-		for p := 0; p < 7; p++ {
-			h1 := (x + p*4) % TargetWidth
-			h2 := (x + p*4 + 1) % TargetWidth
-			l1 := (x + p*4 + 2) % TargetWidth
-			l2 := (x + p*4 + 3) % TargetWidth
-			diff += (columnSums[h1] + columnSums[h2]) - (columnSums[l1] + columnSums[l2])
-		}
-		if diff > maxDiff {
-			maxDiff = diff
-			bestX = x
-		}
-	}
-
-	return bestX
 }
 
 func shiftLine(line []uint8, offset int) []uint8 {
@@ -188,6 +209,9 @@ func shiftLine(line []uint8, offset int) []uint8 {
 	shifted := make([]uint8, width)
 	for x := 0; x < width; x++ {
 		srcX := (x + offset) % width
+		if srcX < 0 {
+			srcX += width
+		}
 		shifted[x] = line[srcX]
 	}
 	return shifted
@@ -196,6 +220,9 @@ func shiftLine(line []uint8, offset int) []uint8 {
 func resampleLine(input []float64, targetLen int) []float64 {
 	output := make([]float64, targetLen)
 	srcLen := len(input)
+	if srcLen == 0 {
+		return output
+	}
 
 	for i := 0; i < targetLen; i++ {
 		srcIdx := float64(i) * float64(srcLen) / float64(targetLen)
@@ -225,8 +252,8 @@ func normalizeLines(lines [][]float64) [][]uint8 {
 	}
 
 	sort.Float64s(allVals)
-	p1Cut := allVals[int(float64(len(allVals))*0.01)]
-	p99Cut := allVals[int(float64(len(allVals))*0.99)]
+	p1Cut := allVals[int(float64(len(allVals))*0.02)]
+	p99Cut := allVals[int(float64(len(allVals))*0.98)]
 
 	rng := p99Cut - p1Cut
 	if rng <= 1e-9 {
