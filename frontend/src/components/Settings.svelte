@@ -236,6 +236,19 @@
         </div>
       </label>
 
+      <label for="save-raw-iq-checkbox" class="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
+        <input
+          id="save-raw-iq-checkbox"
+          type="checkbox"
+          bind:checked={cfg.save_raw_iq}
+          class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-cyan-500"
+        />
+        <div>
+          <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.saveRawIQ')}</span>
+          <span class="text-[10px] text-slate-500 block">{i18n.t('settings.saveRawIQDesc')}</span>
+        </div>
+      </label>
+
       <div>
         <div class="flex items-center justify-between mb-1">
           <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">{i18n.t('settings.defaultGain')}</label>

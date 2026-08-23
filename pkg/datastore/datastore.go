@@ -44,6 +44,7 @@ type Config struct {
 	SimulationMode     bool `json:"simulation_mode"`
 	AutoRecord         bool `json:"auto_record"`
 	AutoRecordDuration int  `json:"auto_record_duration"`
+	SaveRawIQ          bool `json:"save_raw_iq"`
 
 	// Data storage
 	DataDir string `json:"data_dir"`
@@ -57,23 +58,24 @@ type SignalPoint struct {
 }
 
 type PassRecord struct {
-	ID            string        `json:"id"`
-	SatName       string        `json:"sat_name"`
-	Frequency     int           `json:"frequency"`
-	Timestamp     time.Time     `json:"timestamp"`
-	ObserverLat   float64       `json:"observer_lat"`
-	ObserverLon   float64       `json:"observer_lon"`
-	MaxElevation  float64       `json:"max_elevation"`
-	MaxElevationAz float64      `json:"max_elevation_az"`
-	AvgRSSI       float64       `json:"avg_rssi"`
-	PeakRSSI      float64       `json:"peak_rssi"`
-	ImagePath     string        `json:"image_path"`
-	ChannelA      string        `json:"channel_a"`
-	ChannelB      string        `json:"channel_b"`
-	AudioPath     string        `json:"audio_path"`
-	AIAnalysis    string        `json:"ai_analysis"`
-	AnalysisDate  time.Time     `json:"analysis_date"`
-	SignalHistory []SignalPoint `json:"signal_history,omitempty"`
+	ID             string        `json:"id"`
+	SatName        string        `json:"sat_name"`
+	Frequency      int           `json:"frequency"`
+	Timestamp      time.Time     `json:"timestamp"`
+	ObserverLat    float64       `json:"observer_lat"`
+	ObserverLon    float64       `json:"observer_lon"`
+	MaxElevation   float64       `json:"max_elevation"`
+	MaxElevationAz float64       `json:"max_elevation_az"`
+	AvgRSSI        float64       `json:"avg_rssi"`
+	PeakRSSI       float64       `json:"peak_rssi"`
+	ImagePath      string        `json:"image_path"`
+	ChannelA       string        `json:"channel_a"`
+	ChannelB       string        `json:"channel_b"`
+	AudioPath      string        `json:"audio_path"`
+	RawIQPath      string        `json:"raw_iq_path,omitempty"`
+	AIAnalysis     string        `json:"ai_analysis"`
+	AnalysisDate   time.Time     `json:"analysis_date"`
+	SignalHistory  []SignalPoint `json:"signal_history,omitempty"`
 }
 
 type Store struct {
@@ -153,6 +155,7 @@ func (s *Store) initBuckets(baseDir string) error {
 				SimulationMode:     false, // Default to hardware mode (falls back automatically if no hardware)
 				AutoRecord:         false, // Default OFF
 				AutoRecordDuration: 30,
+				SaveRawIQ:          true,
 				DataDir:            baseDir,
 			}
 			data, err := json.Marshal(&defaultCfg)
@@ -198,6 +201,7 @@ func (s *Store) GetConfig() Config {
 		SimulationMode:     false,
 		AutoRecord:         false,
 		AutoRecordDuration: 30,
+		SaveRawIQ:          true,
 	}
 
 	if s == nil || s.conn == nil {

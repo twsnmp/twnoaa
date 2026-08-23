@@ -316,7 +316,25 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		if autoGain {
 			gainDisplay = "AUTO (AGC)"
 		}
-		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%s", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, gainDisplay)
+		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%s, save_raw_iq=%v", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, gainDisplay, cfg.SaveRawIQ)
+
+		// Raw IQ file stream writer if enabled
+		baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
+		rawIQDir := cfg.DataDir + "/raw_iq"
+		rawIQPath := ""
+		var rawIQFile *os.File
+		if cfg.SaveRawIQ {
+			_ = os.MkdirAll(rawIQDir, 0755)
+			rawIQPath = fmt.Sprintf("%s/%s_raw.iq", rawIQDir, baseName)
+			f, err := os.Create(rawIQPath)
+			if err != nil {
+				logger.Warnf("RECORDING", "Failed to create raw IQ file %s: %v", rawIQPath, err)
+				rawIQPath = ""
+			} else {
+				rawIQFile = f
+				defer rawIQFile.Close()
+			}
+		}
 
 		var totalRssi float64
 		var rssiCount int
@@ -338,6 +356,10 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 				if !ok {
 					goto DONE
 				}
+				if rawIQFile != nil {
+					_, _ = rawIQFile.Write(buf)
+				}
+
 				rssi := dsp.CalculateRSSI(buf)
 				totalRssi += rssi
 				rssiCount++
@@ -375,6 +397,10 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 
 	DONE:
 		a.sdrService.Unsubscribe(sub)
+		if rawIQFile != nil {
+			_ = rawIQFile.Close()
+			rawIQFile = nil
+		}
 		a.recMu.Lock()
 		a.recording = false
 		a.recMu.Unlock()
@@ -383,9 +409,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		if rssiCount > 0 {
 			avgRssi = totalRssi / float64(rssiCount)
 		}
-		logger.Infof("RECORDING", "Recording finished for %s: duration=%.1fs, pcm_samples=%d, avg_rssi=%.1f dBFS, peak_rssi=%.1f dBFS, min_rssi=%.1f dBFS, signal_samples=%d", satName, time.Since(startTime).Seconds(), len(pcmSamples), avgRssi, peakRssi, minRssi, len(signalHistory))
+		logger.Infof("RECORDING", "Recording finished for %s: duration=%.1fs, pcm_samples=%d, avg_rssi=%.1f dBFS, peak_rssi=%.1f dBFS, min_rssi=%.1f dBFS, signal_samples=%d, raw_iq=%s", satName, time.Since(startTime).Seconds(), len(pcmSamples), avgRssi, peakRssi, minRssi, len(signalHistory), rawIQPath)
 
-		baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
 		res, err := decoder.DecodeAPT(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
 		if err != nil {
 			logger.Errorf("RECORDING", "Decode failed for %s: %v", satName, err)
@@ -425,6 +450,7 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			ChannelA:       res.ChanAPath,
 			ChannelB:       res.ChanBPath,
 			AudioPath:      wavPath,
+			RawIQPath:      rawIQPath,
 			SignalHistory:  signalHistory,
 		}
 
@@ -690,5 +716,138 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 	}()
 
 	return fmt.Sprintf("WAV decode started for %s...", base)
+}
+
+// SelectAndDecodeRawIQ opens a file dialog to select a Raw IQ (.iq / .raw) file and demodulate/decode it
+func (a *App) SelectAndDecodeRawIQ() string {
+	if a.ctx == nil {
+		return "Error: App context not initialized"
+	}
+
+	selectedPath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Raw IQ Data File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "Raw IQ File (*.iq, *.raw)",
+				Pattern:     "*.iq;*.raw",
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Sprintf("Error selecting file: %v", err)
+	}
+
+	if selectedPath == "" {
+		return "No file selected"
+	}
+
+	return a.DecodeRawIQFile(selectedPath)
+}
+
+// DecodeRawIQFile demodulates a raw 8-bit interleaved IQ file and generates decoded APT images
+func (a *App) DecodeRawIQFile(iqPath string) string {
+	if _, err := os.Stat(iqPath); os.IsNotExist(err) {
+		return fmt.Sprintf("Error: File %s does not exist", iqPath)
+	}
+
+	cfg := a.store.GetConfig()
+	satName := "IQ_Test"
+
+	base := filepath.Base(iqPath)
+	ext := filepath.Ext(base)
+	nameWithoutExt := base[:len(base)-len(ext)]
+	if len(nameWithoutExt) > 0 {
+		satName = fmt.Sprintf("IQ_%s", nameWithoutExt)
+	}
+
+	baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
+	outDir := cfg.DataDir + "/images"
+	audioDir := cfg.DataDir + "/audio"
+
+	logger.Infof("APP", "Starting Raw IQ offline demodulation & decode: file=%s, baseName=%s", iqPath, baseName)
+
+	go func() {
+		f, err := os.Open(iqPath)
+		if err != nil {
+			logger.Errorf("APP", "Failed to open raw IQ file %s: %v", iqPath, err)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "decode_error", err.Error())
+			}
+			return
+		}
+		defer f.Close()
+
+		dspEngine := dsp.NewDSP(cfg.SampleRate, 20800)
+		buf := make([]byte, 1024*128)
+		var pcmSamples []float64
+
+		for {
+			n, err := f.Read(buf)
+			if n > 0 {
+				iqComplex := dsp.ConvertIQToComplex(buf[:n])
+				audio := dspEngine.DemodulateFM(iqComplex)
+				pcmSamples = append(pcmSamples, audio...)
+			}
+			if err != nil {
+				break
+			}
+		}
+
+		if len(pcmSamples) == 0 {
+			logger.Errorf("APP", "No samples demodulated from IQ file %s", iqPath)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "decode_error", "Empty IQ file")
+			}
+			return
+		}
+
+		res, err := decoder.DecodeAPT(pcmSamples, 20800, outDir, baseName)
+		if err != nil {
+			logger.Errorf("APP", "APT decode from IQ failed: %v", err)
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "decode_error", err.Error())
+			}
+			return
+		}
+
+		// Save intermediate demodulated audio WAV
+		_ = os.MkdirAll(audioDir, 0755)
+		wavPath := fmt.Sprintf("%s/%s_audio.wav", audioDir, baseName)
+		int16Audio := dsp.ConvertFloatToINT16(pcmSamples)
+		if err := dsp.SaveWAV(wavPath, 20800, int16Audio); err != nil {
+			wavPath = ""
+		}
+
+		record := &datastore.PassRecord{
+			ID:             baseName,
+			SatName:        satName,
+			Frequency:      137100000,
+			Timestamp:      time.Now(),
+			ObserverLat:    cfg.ObserverLat,
+			ObserverLon:    cfg.ObserverLon,
+			MaxElevation:   90.0,
+			MaxElevationAz: 0.0,
+			AvgRSSI:        0.0,
+			PeakRSSI:       0.0,
+			ImagePath:      res.FullImagePath,
+			ChannelA:       res.ChanAPath,
+			ChannelB:       res.ChanBPath,
+			AudioPath:      wavPath,
+			RawIQPath:      iqPath,
+		}
+
+		_ = a.store.AddRecord(record)
+		logger.Infof("APP", "Raw IQ decode completed and record saved: ID=%s, Image=%s", record.ID, record.ImagePath)
+
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "decode_complete", record)
+		}
+
+		if cfg.AutoAnalyze {
+			a.RunAIAnalysis(record.ID, "ja")
+		}
+	}()
+
+	return fmt.Sprintf("Raw IQ offline decode started for %s...", base)
 }
 

@@ -107,6 +107,28 @@
     }
   }
 
+  async function handleDecodeRawIQ() {
+    if (window.go?.main?.App) {
+      try {
+        decodingWav = true
+        wavStatusMsg = i18n.t('gallery.decodingRawIQ')
+        const msg = await window.go.main.App.SelectAndDecodeRawIQ()
+        wavStatusMsg = msg
+        setTimeout(() => {
+          decodingWav = false
+          wavStatusMsg = ''
+        }, 4000)
+      } catch (err) {
+        console.error("Failed to decode Raw IQ file:", err)
+        wavStatusMsg = "Error: " + (err.message || err)
+        setTimeout(() => {
+          decodingWav = false
+          wavStatusMsg = ''
+        }, 4000)
+      }
+    }
+  }
+
   function getSignalStatus(rec) {
     if (!rec) {
       return {
@@ -378,6 +400,15 @@
       >
         <Upload class="w-4 h-4 text-cyan-400" />
         {i18n.t('gallery.testDecodeWav')}
+      </button>
+      <button
+        type="button"
+        onclick={handleDecodeRawIQ}
+        disabled={decodingWav}
+        class="px-3.5 py-2 bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-500/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+      >
+        <Radio class="w-4 h-4 text-indigo-400" />
+        {i18n.t('gallery.testDecodeRawIQ')}
       </button>
     </div>
   </div>
