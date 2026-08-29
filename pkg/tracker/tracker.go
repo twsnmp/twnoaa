@@ -201,6 +201,57 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 	return states, nil
 }
 
+// GetRemainingPassDuration calculates how many seconds remain before the satellite drops below minElevation
+func (t *Tracker) GetRemainingPassDuration(satName string, obsLat, obsLon, obsAlt float64, minElevation float64) float64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	obs := NewObserver(obsLat, obsLon, obsAlt)
+	now := time.Now().UTC()
+
+	var targetSat *SatelliteInfo
+	for _, sat := range TargetSatellites {
+		if sat.Name == satName {
+			targetSat = &sat
+			break
+		}
+	}
+	if targetSat == nil {
+		return 0
+	}
+
+	tle1, ok1 := t.tleMap[targetSat.NORADID+"_1"]
+	tle2, ok2 := t.tleMap[targetSat.NORADID+"_2"]
+	if !ok1 || !ok2 {
+		tle1 = FallbackTLEs[targetSat.NORADID+"_1"]
+		tle2 = FallbackTLEs[targetSat.NORADID+"_2"]
+	}
+
+	sat, err := parseTLE(tle1, tle2)
+	if err != nil {
+		return 0
+	}
+
+	// Check current elevation first
+	currEcef := sat.propagateECEF(now)
+	currLook := obs.LookAngle(currEcef)
+	if currLook.Elevation < minElevation {
+		return 0
+	}
+
+	// Step forward by 10s up to 25 minutes (1500s) to find when it drops below minElevation
+	step := 10 * time.Second
+	for offset := step; offset <= 25*time.Minute; offset += step {
+		tm := now.Add(offset)
+		ecef := sat.propagateECEF(tm)
+		look := obs.LookAngle(ecef)
+		if look.Elevation < minElevation {
+			return offset.Seconds()
+		}
+	}
+	return 25 * 60
+}
+
 func (t *Tracker) GetUpcomingPasses(obsLat, obsLon, obsAlt float64, hours int) ([]*PassDetail, error) {
 	now := time.Now().UTC()
 	return t.GetPassesInWindow(obsLat, obsLon, obsAlt, now, now.Add(time.Duration(hours)*time.Hour))

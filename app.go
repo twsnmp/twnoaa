@@ -114,29 +114,49 @@ func (a *App) startAutoRecordScheduler() {
 
 					a.recPassMu.Lock()
 					_, alreadyRecorded := a.recordedPasses[passKey]
-					if !alreadyRecorded {
-						a.recordedPasses[passKey] = now
-					}
 					a.recPassMu.Unlock()
 
-					if !alreadyRecorded {
-						duration := cfg.AutoRecordDuration
-						if duration <= 0 {
-							duration = 30
-						}
-						logger.Infof("SCHEDULER", "Active pass detected! Sat: %s (Freq: %.4fMHz, Elev: %.1f°, Az: %.1f°). Starting auto-recording for %ds", sat.Name, float64(sat.Frequency)/1e6, sat.Elevation, sat.Azimuth, duration)
-						if a.ctx != nil {
-							runtime.EventsEmit(a.ctx, "auto_record_started", map[string]interface{}{
-								"sat_name":  sat.Name,
-								"frequency": sat.Frequency,
-								"duration":  duration,
-							})
-						}
-						a.StartRecordingAndDecode(sat.Name, sat.Frequency, duration, cfg.TunerGain, cfg.TunerGainAuto)
-						break
-					} else {
+					if alreadyRecorded {
 						logger.Debugf("SCHEDULER", "Pass already recorded for key %s, skipping", passKey)
+						continue
 					}
+
+					remainingSec := a.tracker.GetRemainingPassDuration(sat.Name, cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt, 5.0)
+					const minPassThresholdSec = 180.0 // Minimum 3 minutes required
+
+					if remainingSec < minPassThresholdSec {
+						logger.Infof("SCHEDULER", "Skipping auto-recording for %s: remaining duration (%.0fs) is less than minimum required (%.0fs)",
+							sat.Name, remainingSec, minPassThresholdSec)
+						a.recPassMu.Lock()
+						a.recordedPasses[passKey] = now
+						a.recPassMu.Unlock()
+						continue
+					}
+
+					a.recPassMu.Lock()
+					a.recordedPasses[passKey] = now
+					a.recPassMu.Unlock()
+
+					duration := cfg.AutoRecordDuration
+					if duration <= 0 {
+						duration = 600
+					}
+					// Cap duration to the remaining pass time so we don't record noise after LOS
+					if int(remainingSec) < duration {
+						duration = int(remainingSec)
+					}
+
+					logger.Infof("SCHEDULER", "Active pass detected! Sat: %s (Freq: %.4fMHz, Elev: %.1f°, Az: %.1f°, Remaining: %.0fs). Starting auto-recording for %ds",
+						sat.Name, float64(sat.Frequency)/1e6, sat.Elevation, sat.Azimuth, remainingSec, duration)
+					if a.ctx != nil {
+						runtime.EventsEmit(a.ctx, "auto_record_started", map[string]interface{}{
+							"sat_name":  sat.Name,
+							"frequency": sat.Frequency,
+							"duration":  duration,
+						})
+					}
+					a.StartRecordingAndDecode(sat.Name, sat.Frequency, duration, cfg.TunerGain, cfg.TunerGainAuto)
+					break
 				}
 			}
 		}
