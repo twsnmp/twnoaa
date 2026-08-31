@@ -68,6 +68,8 @@ type PassRecord struct {
 	MaxElevationAz float64       `json:"max_elevation_az"`
 	AvgRSSI        float64       `json:"avg_rssi"`
 	PeakRSSI       float64       `json:"peak_rssi"`
+	Gain           int           `json:"gain"`
+	GainAuto       bool          `json:"gain_auto"`
 	ImagePath      string        `json:"image_path"`
 	ChannelA       string        `json:"channel_a"`
 	ChannelB       string        `json:"channel_b"`

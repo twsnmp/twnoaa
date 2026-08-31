@@ -5,6 +5,7 @@
   import SignalChart from './SignalChart.svelte'
   import MultiSignalChart from './MultiSignalChart.svelte'
   import AudioPlayer from './AudioPlayer.svelte'
+  import SpectrumViewer from './SpectrumViewer.svelte'
 
   let { onRunAI = () => {} } = $props()
 
@@ -16,11 +17,13 @@
   let recordToDelete = $state(null)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
-  let detailViewTab = $state('image') // 'image' | 'signal' | 'compare' | 'audio'
+  let detailViewTab = $state('image') // 'image' | 'signal' | 'compare' | 'audio' | 'spectrum'
   let decodingWav = $state(false)
   let wavStatusMsg = $state('')
   let standaloneWavPath = $state('')
   let showStandaloneAudioModal = $state(false)
+  let standaloneSpectrumPath = $state('')
+  let showStandaloneSpectrumModal = $state(false)
 
   let selectedRecordsList = $derived(
     records.filter(r => selectedRecordIds.includes(r.id))
@@ -81,6 +84,20 @@
         }
       } catch (err) {
         console.error("Failed to select WAV file:", err)
+      }
+    }
+  }
+
+  async function handleOpenSpectrumFile() {
+    if (window.go?.main?.App?.SelectSpectrumFile) {
+      try {
+        const path = await window.go.main.App.SelectSpectrumFile()
+        if (path) {
+          standaloneSpectrumPath = path
+          showStandaloneSpectrumModal = true
+        }
+      } catch (err) {
+        console.error("Failed to select spectrum file:", err)
       }
     }
   }
@@ -268,6 +285,17 @@
     }
   }
 
+  function formatGain(rec) {
+    if (!rec) return 'N/A'
+    if (rec.gain_auto) {
+      return i18n.t('gallery.gainAuto')
+    }
+    if (rec.gain !== undefined && rec.gain !== null && rec.gain > 0) {
+      return `${(rec.gain / 10.0).toFixed(1)} dB`
+    }
+    return 'N/A'
+  }
+
   let selectedSignal = $derived(getSignalStatus(selectedRecord))
 
   async function loadRecords() {
@@ -383,6 +411,15 @@
       {#if wavStatusMsg}
         <span class="text-xs text-cyan-400 font-medium animate-pulse">{wavStatusMsg}</span>
       {/if}
+      <button
+        type="button"
+        onclick={handleOpenSpectrumFile}
+        class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-cyan-500/50 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer"
+        title={i18n.t('gallery.openSpectrumFile')}
+      >
+        <Activity class="w-4 h-4 text-cyan-400" />
+        {i18n.t('gallery.analyzeSpectrum')}
+      </button>
       <button
         type="button"
         onclick={handleOpenAndPlayWAV}
@@ -543,6 +580,10 @@
                     <span class="text-cyan-400 font-mono">{(rec.frequency / 1e6).toFixed(4)} MHz</span>
                     <span>•</span>
                     <span>{rec.max_elevation}°{rec.max_elevation_az ? ` (${rec.max_elevation_az}°)` : ''}</span>
+                    {#if rec.gain_auto || (rec.gain && rec.gain > 0)}
+                      <span>•</span>
+                      <span class="text-amber-300/90 font-mono font-medium">{formatGain(rec)}</span>
+                    {/if}
                   </div>
                   <span class="text-[10px] text-slate-500 block mt-0.5 font-mono">{new Date(rec.timestamp).toLocaleString()}</span>
                 </div>
@@ -600,6 +641,10 @@
                 <span>{new Date(selectedRecord.timestamp).toLocaleString()}</span>
                 <span>•</span>
                 <span>{i18n.t('gallery.maxElevLabel')} <b class="text-slate-200">{selectedRecord.max_elevation}°{selectedRecord.max_elevation_az ? ` (${selectedRecord.max_elevation_az}°)` : ''}</b></span>
+                {#if selectedRecord.gain_auto || (selectedRecord.gain && selectedRecord.gain > 0)}
+                  <span>•</span>
+                  <span>{i18n.t('gallery.gainLabel')} <b class="text-amber-300 font-mono">{formatGain(selectedRecord)}</b></span>
+                {/if}
                 <span>•</span>
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border text-[11px] font-medium transition-all {selectedSignal.badgeClass}">
                   <div class="inline-flex items-end gap-0.5 h-3">
@@ -651,6 +696,13 @@
                 >
                   <Music class="w-3.5 h-3.5" />
                   {i18n.t('gallery.audioTab')}
+                </button>
+                <button
+                  onclick={() => detailViewTab = 'spectrum'}
+                  class="px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1.5 {detailViewTab === 'spectrum' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}"
+                >
+                  <Activity class="w-3.5 h-3.5" />
+                  {i18n.t('gallery.spectrumTab')}
                 </button>
               </div>
 
@@ -757,7 +809,7 @@
                   <Activity class="w-4 h-4 text-cyan-400" />
                   APT Audio Stream Information
                 </h5>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 font-mono text-[11px]">
+                <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 font-mono text-[11px]">
                   <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
                     <span class="text-slate-500 block text-[10px]">Sampling Rate</span>
                     <span class="text-slate-200 font-bold">20,800 Hz (Mono)</span>
@@ -765,6 +817,10 @@
                   <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
                     <span class="text-slate-500 block text-[10px]">Subcarrier</span>
                     <span class="text-slate-200 font-bold">2,400 Hz AM</span>
+                  </div>
+                  <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                    <span class="text-slate-500 block text-[10px]">Tuner Gain</span>
+                    <span class="text-amber-300 font-bold">{formatGain(selectedRecord)}</span>
                   </div>
                   <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
                     <span class="text-slate-500 block text-[10px]">Max Elevation</span>
@@ -776,6 +832,13 @@
                   </div>
                 </div>
               </div>
+            </div>
+          {:else if detailViewTab === 'spectrum'}
+            <div class="space-y-4">
+              <SpectrumViewer
+                record={selectedRecord}
+                title={`${selectedRecord.sat_name} FFT Spectrum`}
+              />
             </div>
           {/if}
 
@@ -911,4 +974,54 @@
     </div>
   </div>
 {/if}
+
+<!-- Standalone Spectrum Analysis Modal -->
+{#if showStandaloneSpectrumModal && standaloneSpectrumPath}
+  <div class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-4xl w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-cyan-400">
+          <div class="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl">
+            <Activity class="w-5 h-5 text-cyan-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('gallery.analyzeSpectrum')}</h3>
+            <p class="text-xs text-slate-400 font-mono mt-0.5 truncate max-w-md">{standaloneSpectrumPath}</p>
+          </div>
+        </div>
+        <button
+          onclick={() => showStandaloneSpectrumModal = false}
+          class="p-1.5 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <SpectrumViewer
+        filePath={standaloneSpectrumPath}
+        title={standaloneSpectrumPath.split(/[/\\]/).pop()}
+      />
+
+      <div class="flex items-center justify-between pt-2 text-xs">
+        <button
+          type="button"
+          onclick={handleOpenSpectrumFile}
+          class="text-cyan-400 hover:text-cyan-300 transition-colors flex items-center gap-1.5 cursor-pointer"
+        >
+          <Upload class="w-3.5 h-3.5" />
+          {i18n.t('gallery.openSpectrumFile')}
+        </button>
+
+        <button
+          type="button"
+          onclick={() => showStandaloneSpectrumModal = false}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 

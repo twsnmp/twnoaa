@@ -439,3 +439,322 @@ func LoadWAV(filePath string) ([]float64, int, error) {
 
 	return pcmSamples, sampleRate, nil
 }
+
+// SpectrumFrame represents power spectrum at a specific point in time
+type SpectrumFrame struct {
+	TimeSec float64   `json:"time_sec"`
+	Bins    []float64 `json:"bins"`    // Normalized 0.0 to 1.0 for waterfall display
+	BinsDb  []float64 `json:"bins_db"` // Signal level in dBFS (-100.0 to 0.0 dBFS)
+}
+
+// SpectrumData contains complete spectrum timeline data for visualization
+type SpectrumData struct {
+	Type         string          `json:"type"`           // "rf_iq" or "audio_wav"
+	FileName     string          `json:"file_name"`      // Source file basename
+	SampleRate   int             `json:"sample_rate"`    // In Hz
+	CenterFreqHz int             `json:"center_freq_hz"` // Center RF frequency in Hz (0 for audio)
+	DurationSec  float64         `json:"duration_sec"`
+	NumBins      int             `json:"num_bins"`
+	FreqStartHz  float64         `json:"freq_start_hz"`
+	FreqEndHz    float64         `json:"freq_end_hz"`
+	FreqLabels   []string        `json:"freq_labels"`
+	Frames       []SpectrumFrame `json:"frames"`
+}
+
+// AnalyzeRawIQSpectrum reads a raw interleaved 8-bit IQ file and generates spectrum timeline data
+func AnalyzeRawIQSpectrum(filePath string, centerFreqHz, sampleRate, numBins int, maxFrames int) (*SpectrumData, error) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat IQ file: %w", err)
+	}
+
+	fileSize := fileInfo.Size()
+	totalSamples := fileSize / 2
+	if totalSamples < int64(numBins) {
+		return nil, errors.New("IQ file is too short for spectrum analysis")
+	}
+
+	if numBins < 32 {
+		numBins = 128
+	}
+	if maxFrames <= 0 || maxFrames > 2000 {
+		maxFrames = 800
+	}
+
+	durationSec := float64(totalSamples) / float64(sampleRate)
+
+	// Determine step between frames
+	numFrames := int(durationSec * 4) // Target 4 frames per second
+	if numFrames > maxFrames {
+		numFrames = maxFrames
+	}
+	if numFrames < 10 {
+		numFrames = 10
+	}
+	if int64(numFrames) > totalSamples/int64(numBins*4) {
+		numFrames = int(totalSamples / int64(numBins*4))
+	}
+	if numFrames < 1 {
+		numFrames = 1
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open IQ file: %w", err)
+	}
+	defer f.Close()
+
+	blockSize := numBins * 8 // 4 blocks of FFT for averaging
+	buf := make([]byte, blockSize*2)
+
+	frames := make([]SpectrumFrame, 0, numFrames)
+	sampleStep := float64(totalSamples-int64(blockSize)) / float64(numFrames)
+	if sampleStep < float64(blockSize) {
+		sampleStep = float64(blockSize)
+	}
+
+	for i := 0; i < numFrames; i++ {
+		sampleOffset := int64(float64(i) * sampleStep)
+		byteOffset := sampleOffset * 2
+		if byteOffset+int64(len(buf)) > fileSize {
+			break
+		}
+
+		_, err := f.Seek(byteOffset, io.SeekStart)
+		if err != nil {
+			break
+		}
+
+		n, err := io.ReadFull(f, buf)
+		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+			break
+		}
+		if n < numBins*2 {
+			break
+		}
+
+		timeSec := float64(sampleOffset) / float64(sampleRate)
+		binsNorm, binsDb := calculateRawIQSpectrumBins(buf[:n], numBins)
+
+		frames = append(frames, SpectrumFrame{
+			TimeSec: math.Round(timeSec*100) / 100,
+			Bins:    binsNorm,
+			BinsDb:  binsDb,
+		})
+	}
+
+	freqStart := float64(centerFreqHz) - float64(sampleRate)/2.0
+	freqEnd := float64(centerFreqHz) + float64(sampleRate)/2.0
+
+	// Generate 5 frequency labels
+	labels := make([]string, 5)
+	for i := 0; i < 5; i++ {
+		fMHz := (freqStart + (freqEnd-freqStart)*float64(i)/4.0) / 1e6
+		labels[i] = fmt.Sprintf("%.3f MHz", fMHz)
+	}
+
+	return &SpectrumData{
+		Type:         "rf_iq",
+		FileName:     fileInfo.Name(),
+		SampleRate:   sampleRate,
+		CenterFreqHz: centerFreqHz,
+		DurationSec:  math.Round(durationSec*10) / 10,
+		NumBins:      numBins,
+		FreqStartHz:  freqStart,
+		FreqEndHz:    freqEnd,
+		FreqLabels:   labels,
+		Frames:       frames,
+	}, nil
+}
+
+func calculateRawIQSpectrumBins(buf []byte, numBins int) (normBins, dbBins []float64) {
+	numSamples := len(buf) / 2
+	blocks := numSamples / numBins
+	if blocks > 4 {
+		blocks = 4
+	}
+	if blocks < 1 {
+		blocks = 1
+	}
+
+	// Calculate DC offset
+	var sumR, sumIm float64
+	for i := 0; i < numSamples; i++ {
+		sumR += (float64(buf[2*i]) - 127.5) / 127.5
+		sumIm += (float64(buf[2*i+1]) - 127.5) / 127.5
+	}
+	meanR := sumR / float64(numSamples)
+	meanIm := sumIm / float64(numSamples)
+
+	avgPower := make([]float64, numBins)
+
+	for b := 0; b < blocks; b++ {
+		fftInput := make([]complex128, numBins)
+		for i := 0; i < numBins; i++ {
+			idx := b*numBins + i
+			r := (float64(buf[2*idx]) - 127.5) / 127.5 - meanR
+			im := (float64(buf[2*idx+1]) - 127.5) / 127.5 - meanIm
+
+			// Hann Window
+			w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(numBins-1)))
+			fftInput[i] = complex(r*w, im*w)
+		}
+
+		fftOut := fft(fftInput)
+
+		// fftshift
+		half := numBins / 2
+		for i := 0; i < numBins; i++ {
+			shiftedIdx := (i + half) % numBins
+			p := cmplx.Abs(fftOut[shiftedIdx])
+			pDb := 10 * math.Log10(p*p + 1e-12)
+			avgPower[i] += pDb
+		}
+	}
+
+	normBins = make([]float64, numBins)
+	dbBins = make([]float64, numBins)
+
+	for i := 0; i < numBins; i++ {
+		pDb := avgPower[i] / float64(blocks)
+		if pDb > 0 {
+			pDb = 0
+		}
+		if pDb < -100 {
+			pDb = -100
+		}
+		dbBins[i] = math.Round(pDb*10) / 10
+		normBins[i] = math.Max(0, math.Min(1.0, (pDb+45.0)/40.0))
+	}
+
+	// Remove DC spike at center bin
+	centerBin := numBins / 2
+	if centerBin > 0 && centerBin < numBins-1 {
+		normBins[centerBin] = (normBins[centerBin-1] + normBins[centerBin+1]) / 2.0
+		dbBins[centerBin] = (dbBins[centerBin-1] + dbBins[centerBin+1]) / 2.0
+	}
+
+	return normBins, dbBins
+}
+
+// AnalyzeWAVSpectrum reads a WAV audio file and generates audio spectrum timeline data
+func AnalyzeWAVSpectrum(filePath string, numBins, maxFrames int) (*SpectrumData, error) {
+	pcmSamples, sampleRate, err := LoadWAV(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load WAV file: %w", err)
+	}
+
+	if len(pcmSamples) < numBins*2 {
+		return nil, errors.New("WAV file is too short for spectrum analysis")
+	}
+
+	if numBins < 32 {
+		numBins = 128
+	}
+	if maxFrames <= 0 || maxFrames > 2000 {
+		maxFrames = 800
+	}
+
+	durationSec := float64(len(pcmSamples)) / float64(sampleRate)
+
+	// Target ~8 frames per second for audio
+	numFrames := int(durationSec * 8)
+	if numFrames > maxFrames {
+		numFrames = maxFrames
+	}
+	if numFrames < 10 {
+		numFrames = 10
+	}
+	fftSize := numBins * 2 // FFT size is 2 * numBins to produce numBins positive frequency bins
+	if int64(numFrames) > int64(len(pcmSamples))/int64(fftSize) {
+		numFrames = len(pcmSamples) / fftSize
+	}
+	if numFrames < 1 {
+		numFrames = 1
+	}
+
+	frames := make([]SpectrumFrame, 0, numFrames)
+	sampleStep := float64(len(pcmSamples)-fftSize) / float64(numFrames)
+	if sampleStep < float64(fftSize/2) {
+		sampleStep = float64(fftSize / 2)
+	}
+
+	for i := 0; i < numFrames; i++ {
+		offset := int(float64(i) * sampleStep)
+		if offset+fftSize > len(pcmSamples) {
+			break
+		}
+
+		timeSec := float64(offset) / float64(sampleRate)
+		binsNorm, binsDb := calculateRealAudioSpectrumBins(pcmSamples[offset:offset+fftSize], numBins)
+
+		frames = append(frames, SpectrumFrame{
+			TimeSec: math.Round(timeSec*100) / 100,
+			Bins:    binsNorm,
+			BinsDb:  binsDb,
+		})
+	}
+
+	freqStart := 0.0
+	freqEnd := float64(sampleRate) / 2.0 // Nyquist frequency (e.g. 10.4 kHz)
+
+	labels := make([]string, 5)
+	for i := 0; i < 5; i++ {
+		fKHz := (freqStart + (freqEnd-freqStart)*float64(i)/4.0) / 1000.0
+		labels[i] = fmt.Sprintf("%.1f kHz", fKHz)
+	}
+
+	fileInfo, _ := os.Stat(filePath)
+	fileName := filePath
+	if fileInfo != nil {
+		fileName = fileInfo.Name()
+	}
+
+	return &SpectrumData{
+		Type:         "audio_wav",
+		FileName:     fileName,
+		SampleRate:   sampleRate,
+		CenterFreqHz: 0,
+		DurationSec:  math.Round(durationSec*10) / 10,
+		NumBins:      numBins,
+		FreqStartHz:  freqStart,
+		FreqEndHz:    freqEnd,
+		FreqLabels:   labels,
+		Frames:       frames,
+	}, nil
+}
+
+func calculateRealAudioSpectrumBins(samples []float64, numBins int) (normBins, dbBins []float64) {
+	fftSize := numBins * 2
+	if len(samples) < fftSize {
+		return make([]float64, numBins), make([]float64, numBins)
+	}
+
+	// Apply Hann window
+	fftInput := make([]complex128, fftSize)
+	for i := 0; i < fftSize; i++ {
+		w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(fftSize-1)))
+		fftInput[i] = complex(samples[i]*w, 0)
+	}
+
+	fftOut := fft(fftInput)
+
+	normBins = make([]float64, numBins)
+	dbBins = make([]float64, numBins)
+
+	for i := 0; i < numBins; i++ {
+		p := cmplx.Abs(fftOut[i])
+		pDb := 20 * math.Log10(p/float64(numBins) + 1e-12)
+		if pDb > 0 {
+			pDb = 0
+		}
+		if pDb < -100 {
+			pDb = -100
+		}
+		dbBins[i] = math.Round(pDb*10) / 10
+		normBins[i] = math.Max(0, math.Min(1.0, (pDb+55.0)/45.0))
+	}
+
+	return normBins, dbBins
+}
+

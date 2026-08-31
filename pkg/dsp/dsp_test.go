@@ -2,6 +2,7 @@ package dsp
 
 import (
 	"math"
+	"os"
 	"testing"
 )
 
@@ -142,5 +143,61 @@ func TestSaveAndLoadWAV(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeRawIQSpectrumAndWAVSpectrum(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Test AnalyzeRawIQSpectrum
+	iqPath := tempDir + "/test_raw.iq"
+	iqBuf := make([]byte, 208000*2) // 0.1 sec at 2.08 MSps
+	for i := 0; i < 208000; i++ {
+		angle := float64(i) * 0.05
+		iqBuf[2*i] = byte((math.Cos(angle) + 1.0) * 127.5)
+		iqBuf[2*i+1] = byte((math.Sin(angle) + 1.0) * 127.5)
+	}
+	if err := os.WriteFile(iqPath, iqBuf, 0644); err != nil {
+		t.Fatalf("Failed to write test IQ file: %v", err)
+	}
+
+	iqSpec, err := AnalyzeRawIQSpectrum(iqPath, 137100000, 2080000, 128, 50)
+	if err != nil {
+		t.Fatalf("AnalyzeRawIQSpectrum failed: %v", err)
+	}
+	if iqSpec.Type != "rf_iq" {
+		t.Errorf("Expected Type rf_iq, got %s", iqSpec.Type)
+	}
+	if len(iqSpec.Frames) == 0 {
+		t.Fatalf("Expected non-empty frames, got 0")
+	}
+	if len(iqSpec.Frames[0].Bins) != 128 || len(iqSpec.Frames[0].BinsDb) != 128 {
+		t.Errorf("Expected 128 bins in frame, got %d and %d", len(iqSpec.Frames[0].Bins), len(iqSpec.Frames[0].BinsDb))
+	}
+
+	// 2. Test AnalyzeWAVSpectrum
+	wavPath := tempDir + "/test_audio.wav"
+	wavSamples := make([]float64, 20800) // 1 sec at 20.8 kHz
+	for i := 0; i < 20800; i++ {
+		tSec := float64(i) / 20800.0
+		wavSamples[i] = 0.7 * math.Sin(2.0*math.Pi*2400.0*tSec) // 2.4 kHz AM carrier
+	}
+	if err := SaveAudioToWAV(wavPath, 20800, wavSamples); err != nil {
+		t.Fatalf("Failed to write test WAV: %v", err)
+	}
+
+	wavSpec, err := AnalyzeWAVSpectrum(wavPath, 128, 50)
+	if err != nil {
+		t.Fatalf("AnalyzeWAVSpectrum failed: %v", err)
+	}
+	if wavSpec.Type != "audio_wav" {
+		t.Errorf("Expected Type audio_wav, got %s", wavSpec.Type)
+	}
+	if len(wavSpec.Frames) == 0 {
+		t.Fatalf("Expected non-empty frames for WAV, got 0")
+	}
+	if len(wavSpec.Frames[0].Bins) != 128 || len(wavSpec.Frames[0].BinsDb) != 128 {
+		t.Errorf("Expected 128 bins in WAV frame, got %d and %d", len(wavSpec.Frames[0].Bins), len(wavSpec.Frames[0].BinsDb))
+	}
+}
+
 
 

@@ -466,6 +466,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			MaxElevationAz: maxElevAz,
 			AvgRSSI:        avgRssi,
 			PeakRSSI:       peakRssi,
+			Gain:           gain,
+			GainAuto:       autoGain,
 			ImagePath:      res.FullImagePath,
 			ChannelA:       res.ChanAPath,
 			ChannelB:       res.ChanBPath,
@@ -716,6 +718,8 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			MaxElevationAz: 0.0,
 			AvgRSSI:        0.0,
 			PeakRSSI:       0.0,
+			Gain:           cfg.TunerGain,
+			GainAuto:       cfg.TunerGainAuto,
 			ImagePath:      res.FullImagePath,
 			ChannelA:       res.ChanAPath,
 			ChannelB:       res.ChanBPath,
@@ -849,6 +853,8 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			MaxElevationAz: 0.0,
 			AvgRSSI:        0.0,
 			PeakRSSI:       0.0,
+			Gain:           cfg.TunerGain,
+			GainAuto:       cfg.TunerGainAuto,
 			ImagePath:      res.FullImagePath,
 			ChannelA:       res.ChanAPath,
 			ChannelB:       res.ChanBPath,
@@ -871,3 +877,110 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 	return fmt.Sprintf("Raw IQ offline decode started for %s...", base)
 }
 
+// GetRecordSpectrum calculates and returns spectrum timeline data for a pass record
+func (a *App) GetRecordSpectrum(recordID string, preferredSource string) (*dsp.SpectrumData, error) {
+	records := a.store.GetRecords()
+	var target *datastore.PassRecord
+	for _, r := range records {
+		if r.ID == recordID {
+			target = r
+			break
+		}
+	}
+
+	if target == nil {
+		return nil, fmt.Errorf("record %s not found", recordID)
+	}
+
+	cfg := a.store.GetConfig()
+	sampleRate := cfg.SampleRate
+	if sampleRate <= 0 {
+		sampleRate = 2080000
+	}
+
+	hasRawIQ := target.RawIQPath != ""
+	if hasRawIQ {
+		if _, err := os.Stat(target.RawIQPath); os.IsNotExist(err) {
+			hasRawIQ = false
+		}
+	}
+
+	hasWAV := target.AudioPath != ""
+	if hasWAV {
+		if _, err := os.Stat(target.AudioPath); os.IsNotExist(err) {
+			hasWAV = false
+		}
+	}
+
+	if preferredSource == "raw_iq" || (preferredSource != "audio_wav" && hasRawIQ) {
+		if !hasRawIQ {
+			return nil, fmt.Errorf("raw IQ file not found for record %s", recordID)
+		}
+		freq := target.Frequency
+		if freq <= 0 {
+			freq = 137100000
+		}
+		logger.Infof("SPECTRUM", "Analyzing Raw IQ spectrum for record %s (%s)", recordID, target.RawIQPath)
+		return dsp.AnalyzeRawIQSpectrum(target.RawIQPath, freq, sampleRate, 128, 800)
+	}
+
+	if hasWAV {
+		logger.Infof("SPECTRUM", "Analyzing Audio WAV spectrum for record %s (%s)", recordID, target.AudioPath)
+		return dsp.AnalyzeWAVSpectrum(target.AudioPath, 128, 800)
+	}
+
+	return nil, fmt.Errorf("no raw IQ or audio WAV file available for record %s", recordID)
+}
+
+// AnalyzeSpectrumFile analyzes a specified Raw IQ or WAV audio file and returns spectrum timeline data
+func (a *App) AnalyzeSpectrumFile(filePath string) (*dsp.SpectrumData, error) {
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("file not found: %s", filePath)
+	}
+
+	cfg := a.store.GetConfig()
+	sampleRate := cfg.SampleRate
+	if sampleRate <= 0 {
+		sampleRate = 2080000
+	}
+
+	ext := filepath.Ext(filePath)
+	if ext == ".iq" || ext == ".raw" {
+		logger.Infof("SPECTRUM", "Analyzing external Raw IQ file: %s", filePath)
+		return dsp.AnalyzeRawIQSpectrum(filePath, 137100000, sampleRate, 128, 800)
+	}
+
+	logger.Infof("SPECTRUM", "Analyzing external WAV file: %s", filePath)
+	return dsp.AnalyzeWAVSpectrum(filePath, 128, 800)
+}
+
+// SelectSpectrumFile opens a file dialog to select a Raw IQ (.iq/.raw) or WAV (.wav) file
+func (a *App) SelectSpectrumFile() string {
+	if a.ctx == nil {
+		return ""
+	}
+
+	selectedPath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Raw IQ or WAV Audio File",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "Raw IQ & WAV Files (*.iq, *.raw, *.wav)",
+				Pattern:     "*.iq;*.raw;*.wav",
+			},
+			{
+				DisplayName: "Raw IQ Files (*.iq, *.raw)",
+				Pattern:     "*.iq;*.raw",
+			},
+			{
+				DisplayName: "WAV Audio Files (*.wav)",
+				Pattern:     "*.wav",
+			},
+		},
+	})
+	if err != nil {
+		logger.Warnf("APP", "Error selecting spectrum file: %v", err)
+		return ""
+	}
+
+	return selectedPath
+}
