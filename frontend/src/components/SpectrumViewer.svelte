@@ -32,9 +32,28 @@
       : null
   )
 
+  let targetFreqHz = $derived.by(() => {
+    if (!spectrumData) return null
+    if (spectrumData.type === 'audio_wav') {
+      return 2400 // APT subcarrier frequency (2.4 kHz)
+    }
+    if (record?.frequency && record.frequency > 0) {
+      return record.frequency
+    }
+    return spectrumData.center_freq_hz || null
+  })
+
+  let targetBandwidthHz = $derived.by(() => {
+    if (!spectrumData) return 0
+    if (spectrumData.type === 'audio_wav') {
+      return 2000 // ±1 kHz for audio subcarrier
+    }
+    return 40000 // ±20 kHz for RF APT signal bandwidth
+  })
+
   let peakInfo = $derived.by(() => {
     if (!currentFrame || !currentFrame.bins_db || !spectrumData) {
-      return { freq: 'N/A', dbfs: 'N/A' }
+      return { freq: 'N/A', dbfs: 'N/A', freqHz: 0 }
     }
     const dbs = currentFrame.bins_db
     let maxDb = -200
@@ -57,8 +76,58 @@
     }
 
     return {
+      freqHz: peakFreqHz,
       freq: freqText,
       dbfs: `${maxDb.toFixed(1)} dBFS`
+    }
+  })
+
+  let targetInfo = $derived.by(() => {
+    if (!currentFrame || !currentFrame.bins_db || !spectrumData || !targetFreqHz) {
+      return { freq: 'N/A', dbfs: 'N/A', delta: '', inBand: false, targetDb: -100 }
+    }
+    const freqSpan = spectrumData.freq_end_hz - spectrumData.freq_start_hz
+    if (freqSpan <= 0) {
+      return { freq: 'N/A', dbfs: 'N/A', delta: '', inBand: false, targetDb: -100 }
+    }
+
+    const targetRatio = (targetFreqHz - spectrumData.freq_start_hz) / freqSpan
+    const dbs = currentFrame.bins_db
+    let targetDb = -100
+
+    if (targetRatio >= 0 && targetRatio <= 1) {
+      const floatIdx = targetRatio * (dbs.length - 1)
+      const i0 = Math.floor(floatIdx)
+      const i1 = Math.min(dbs.length - 1, i0 + 1)
+      const frac = floatIdx - i0
+      targetDb = dbs[i0] * (1 - frac) + dbs[i1] * frac
+    }
+
+    let freqText = ''
+    if (spectrumData.type === 'rf_iq') {
+      freqText = `${(targetFreqHz / 1e6).toFixed(4)} MHz`
+    } else {
+      freqText = `${(targetFreqHz / 1e3).toFixed(2)} kHz`
+    }
+
+    let deltaText = ''
+    if (peakInfo && peakInfo.freqHz) {
+      const deltaHz = peakInfo.freqHz - targetFreqHz
+      if (spectrumData.type === 'rf_iq') {
+        const deltaKHz = deltaHz / 1e3
+        deltaText = `${deltaKHz >= 0 ? '+' : ''}${deltaKHz.toFixed(1)} kHz`
+      } else {
+        deltaText = `${deltaHz >= 0 ? '+' : ''}${deltaHz.toFixed(0)} Hz`
+      }
+    }
+
+    return {
+      freqHz: targetFreqHz,
+      freq: freqText,
+      dbfs: `${targetDb.toFixed(1)} dBFS`,
+      delta: deltaText,
+      inBand: targetRatio >= 0 && targetRatio <= 1,
+      targetDb: targetDb
     }
   })
 
@@ -208,7 +277,15 @@
     const frames = spectrumData.frames
     const numBins = spectrumData.num_bins
 
-    const imgData = ctx.createImageData(width, height)
+    const startX = 35
+    const plotWidth = width - 45
+
+    // 1. Clear background & draw left gutter
+    ctx.fillStyle = '#090d16'
+    ctx.fillRect(0, 0, width, height)
+
+    // 2. Generate Waterfall Heatmap for plot area (plotWidth x height)
+    const imgData = ctx.createImageData(plotWidth, height)
     const data = imgData.data
 
     for (let y = 0; y < height; y++) {
@@ -216,12 +293,12 @@
       const frame = frames[frameIdx]
       const bins = frame ? frame.bins : []
 
-      for (let x = 0; x < width; x++) {
-        const binIdx = Math.floor((x / width) * numBins)
+      for (let x = 0; x < plotWidth; x++) {
+        const binIdx = Math.floor((x / plotWidth) * numBins)
         const val = bins[binIdx] || 0
         const [r, g, b] = getHeatmapColor(val)
 
-        const pixelIdx = (y * width + x) * 4
+        const pixelIdx = (y * plotWidth + x) * 4
         data[pixelIdx] = r
         data[pixelIdx + 1] = g
         data[pixelIdx + 2] = b
@@ -229,7 +306,81 @@
       }
     }
 
-    ctx.putImageData(imgData, 0, 0)
+    ctx.putImageData(imgData, startX, 0)
+
+    // 3. Draw Left Time Axis Gutter & Ticks
+    ctx.strokeStyle = 'rgba(51, 65, 85, 0.6)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(startX, 0)
+    ctx.lineTo(startX, height)
+    ctx.stroke()
+
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.7)'
+    ctx.font = '9px monospace'
+    ctx.textAlign = 'right'
+    ctx.fillText('00:00', 30, 10)
+    ctx.fillText(formatTime(spectrumData.duration_sec / 2), 30, height / 2 + 3)
+    ctx.fillText(formatTime(spectrumData.duration_sec), 30, height - 4)
+
+    // 4. Draw Target Bandwidth & Frequency Guide Line on Waterfall
+    const freqSpan = spectrumData.freq_end_hz - spectrumData.freq_start_hz
+    if (targetFreqHz && freqSpan > 0) {
+      const r = (targetFreqHz - spectrumData.freq_start_hz) / freqSpan
+      if (r >= 0 && r <= 1) {
+        const targetX = startX + r * plotWidth
+
+        // Bandwidth highlight shading
+        if (targetBandwidthHz > 0) {
+          const bwHalf = (targetBandwidthHz / 2 / freqSpan) * plotWidth
+          const leftBw = Math.max(startX, targetX - bwHalf)
+          const rightBw = Math.min(startX + plotWidth, targetX + bwHalf)
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.16)'
+          ctx.fillRect(leftBw, 0, rightBw - leftBw, height)
+
+          // Band boundary lines
+          ctx.save()
+          ctx.strokeStyle = 'rgba(16, 185, 129, 0.35)'
+          ctx.setLineDash([2, 2])
+          ctx.beginPath()
+          ctx.moveTo(leftBw, 0)
+          ctx.lineTo(leftBw, height)
+          ctx.moveTo(rightBw, 0)
+          ctx.lineTo(rightBw, height)
+          ctx.stroke()
+          ctx.restore()
+        }
+
+        // Target Vertical Guideline
+        ctx.save()
+        ctx.strokeStyle = '#10b981'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([4, 3])
+        ctx.beginPath()
+        ctx.moveTo(targetX, 0)
+        ctx.lineTo(targetX, height)
+        ctx.stroke()
+
+        // Markers at top & bottom
+        ctx.fillStyle = '#10b981'
+        // Top arrow (points down)
+        ctx.beginPath()
+        ctx.moveTo(targetX - 4, 0)
+        ctx.lineTo(targetX + 4, 0)
+        ctx.lineTo(targetX, 6)
+        ctx.closePath()
+        ctx.fill()
+
+        // Bottom arrow (points up)
+        ctx.beginPath()
+        ctx.moveTo(targetX - 4, height)
+        ctx.lineTo(targetX + 4, height)
+        ctx.lineTo(targetX, height - 6)
+        ctx.closePath()
+        ctx.fill()
+        ctx.restore()
+      }
+    }
   }
 
   function drawInstantSpectrum() {
@@ -239,6 +390,10 @@
     const height = spectrumCanvas.height
 
     ctx.clearRect(0, 0, width, height)
+
+    const plotWidth = width - 45
+    const plotHeight = height - 24
+    const startX = 35
 
     // Background Grid
     ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)'
@@ -251,9 +406,9 @@
     ctx.textAlign = 'right'
 
     for (const db of dbLevels) {
-      const y = ((0 - db) / 100) * (height - 24) + 12
+      const y = ((0 - db) / 100) * plotHeight + 12
       ctx.beginPath()
-      ctx.moveTo(35, y)
+      ctx.moveTo(startX, y)
       ctx.lineTo(width - 10, y)
       ctx.stroke()
       ctx.fillText(`${db}`, 30, y + 3)
@@ -262,18 +417,45 @@
     // Vertical Frequency Grid Lines
     const numVert = 5
     for (let i = 0; i < numVert; i++) {
-      const x = 35 + (i / (numVert - 1)) * (width - 45)
+      const x = startX + (i / (numVert - 1)) * plotWidth
       ctx.beginPath()
       ctx.moveTo(x, 10)
       ctx.lineTo(x, height - 12)
       ctx.stroke()
     }
 
+    // Frequency conversion helper
+    const freqSpan = spectrumData.freq_end_hz - spectrumData.freq_start_hz
+    const getXForFreq = (freq) => {
+      if (freqSpan <= 0) return null
+      const r = (freq - spectrumData.freq_start_hz) / freqSpan
+      return startX + r * plotWidth
+    }
+
+    // Draw Target Bandwidth Shading if applicable
+    if (targetFreqHz && targetBandwidthHz > 0 && freqSpan > 0) {
+      const leftX = Math.max(startX, Math.min(startX + plotWidth, getXForFreq(targetFreqHz - targetBandwidthHz / 2)))
+      const rightX = Math.max(startX, Math.min(startX + plotWidth, getXForFreq(targetFreqHz + targetBandwidthHz / 2)))
+      const bwWidth = rightX - leftX
+      if (bwWidth > 0) {
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.12)'
+        ctx.fillRect(leftX, 12, bwWidth, plotHeight)
+        // Band edges
+        ctx.save()
+        ctx.strokeStyle = 'rgba(16, 185, 129, 0.3)'
+        ctx.setLineDash([2, 2])
+        ctx.beginPath()
+        ctx.moveTo(leftX, 12)
+        ctx.lineTo(leftX, 12 + plotHeight)
+        ctx.moveTo(rightX, 12)
+        ctx.lineTo(rightX, 12 + plotHeight)
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
     // Draw Spectrum Path
     const dbs = currentFrame.bins_db
-    const plotWidth = width - 45
-    const plotHeight = height - 24
-    const startX = 35
 
     ctx.beginPath()
     for (let i = 0; i < dbs.length; i++) {
@@ -316,6 +498,62 @@
     ctx.strokeStyle = '#22d3ee'
     ctx.lineWidth = 1.8
     ctx.stroke()
+
+    // Draw Target Frequency Guideline & Marker
+    if (targetFreqHz && freqSpan > 0) {
+      const targetX = getXForFreq(targetFreqHz)
+      if (targetX >= startX && targetX <= startX + plotWidth) {
+        // Vertical dashed line
+        ctx.save()
+        ctx.strokeStyle = '#10b981'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([4, 3])
+        ctx.beginPath()
+        ctx.moveTo(targetX, 12)
+        ctx.lineTo(targetX, 12 + plotHeight)
+        ctx.stroke()
+        ctx.restore()
+
+        // Target marker on spectrum curve
+        const targetDb = targetInfo.targetDb ?? -100
+        const clampedDb = Math.max(-100, Math.min(0, targetDb))
+        const targetY = 12 + ((0 - clampedDb) / 100) * plotHeight
+
+        ctx.beginPath()
+        ctx.arc(targetX, targetY, 4, 0, 2 * Math.PI)
+        ctx.fillStyle = '#10b981'
+        ctx.fill()
+        ctx.strokeStyle = '#ffffff'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+
+        // Top Target Pin and Badge
+        ctx.save()
+        ctx.fillStyle = '#10b981'
+        ctx.beginPath()
+        ctx.moveTo(targetX, 12)
+        ctx.lineTo(targetX - 4, 6)
+        ctx.lineTo(targetX + 4, 6)
+        ctx.closePath()
+        ctx.fill()
+
+        ctx.font = 'bold 8.5px monospace'
+        ctx.textAlign = 'center'
+        const labelText = 'TARGET'
+        const textWidth = ctx.measureText(labelText).width
+        const badgeX = Math.max(startX + textWidth / 2 + 4, Math.min(startX + plotWidth - textWidth / 2 - 4, targetX))
+
+        ctx.fillStyle = 'rgba(6, 78, 59, 0.95)'
+        ctx.fillRect(badgeX - textWidth / 2 - 3, 0, textWidth + 6, 11)
+        ctx.strokeStyle = '#10b981'
+        ctx.lineWidth = 1
+        ctx.strokeRect(badgeX - textWidth / 2 - 3, 0, textWidth + 6, 11)
+
+        ctx.fillStyle = '#6ee7b7'
+        ctx.fillText(labelText, badgeX, 8.5)
+        ctx.restore()
+      }
+    }
 
     // Highlight Peak Point
     let maxDb = -200
@@ -410,8 +648,24 @@
       {/if}
 
       {#if currentFrame}
-        <div class="flex items-center gap-2 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono">
-          <span class="text-slate-500">Peak:</span>
+        <!-- Target Badge -->
+        {#if targetInfo.inBand}
+          <div class="flex items-center gap-1.5 bg-emerald-950/50 px-3 py-1.5 rounded-xl border border-emerald-500/30 text-[11px] font-mono">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span class="text-emerald-400 font-semibold">{i18n.t('gallery.targetFreq')}:</span>
+            <span class="text-emerald-200 font-bold">{targetInfo.freq}</span>
+            <span class="text-emerald-600/70">|</span>
+            <span class="text-emerald-300 font-bold">{targetInfo.dbfs}</span>
+            {#if targetInfo.delta}
+              <span class="text-slate-400 text-[10px] ml-1">({i18n.t('gallery.freqDelta')}: <span class="text-amber-300">{targetInfo.delta}</span>)</span>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- Peak Badge -->
+        <div class="flex items-center gap-1.5 bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono">
+          <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+          <span class="text-slate-400">{i18n.t('gallery.peakFreq')}:</span>
           <span class="text-cyan-300 font-bold">{peakInfo.freq}</span>
           <span class="text-slate-600">|</span>
           <span class="text-rose-400 font-bold">{peakInfo.dbfs}</span>
@@ -441,7 +695,19 @@
             {i18n.t('gallery.instantSpectrumTitle')}
             <span class="font-mono text-cyan-400 text-[10px]">({formatTime(currentFrame?.time_sec || 0)})</span>
           </span>
-          <span class="font-mono text-slate-500 text-[10px]">dBFS vs Frequency</span>
+          <div class="flex items-center gap-3 text-[10px] font-mono">
+            {#if targetInfo.inBand}
+              <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                <span class="text-emerald-300 font-semibold">{i18n.t('gallery.targetFreq')}</span>
+              </span>
+            {/if}
+            <span class="flex items-center gap-1">
+              <span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+              <span class="text-rose-300 font-semibold">{i18n.t('gallery.peakFreq')}</span>
+            </span>
+            <span class="text-slate-500">dBFS vs Frequency</span>
+          </div>
         </div>
 
         <div class="relative bg-slate-900/90 rounded-xl border border-slate-800 overflow-hidden p-2">
@@ -470,12 +736,20 @@
             <Radio class="w-3.5 h-3.5 text-indigo-400" />
             {i18n.t('gallery.waterfallTitle')}
           </span>
-          <span class="text-[10px] text-slate-500">
-            Click anywhere on waterfall to jump timeline
-          </span>
+          <div class="flex items-center gap-3 text-[10px]">
+            {#if targetInfo.inBand}
+              <span class="flex items-center gap-1 text-[10px] font-mono">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                <span class="text-emerald-300 font-semibold">{i18n.t('gallery.targetFreq')} ({targetInfo.freq})</span>
+              </span>
+            {/if}
+            <span class="text-slate-500">
+              Click anywhere on waterfall to jump timeline
+            </span>
+          </div>
         </div>
 
-        <div class="relative bg-slate-900/90 rounded-xl border border-slate-800 overflow-hidden cursor-crosshair">
+        <div class="relative bg-slate-900/90 rounded-xl border border-slate-800 overflow-hidden p-2 cursor-crosshair">
           <canvas
             bind:this={waterfallCanvas}
             width="640"
@@ -488,8 +762,8 @@
           {#if spectrumData.frames.length > 0}
             {@const cursorTopPercent = (currentFrameIndex / (spectrumData.frames.length - 1)) * 100}
             <div
-              class="absolute left-0 right-0 pointer-events-none border-b-2 border-rose-500/90 shadow-[0_0_8px_rgba(244,63,94,0.8)] flex items-center justify-between px-2"
-              style="top: {cursorTopPercent}%; transform: translateY(-50%);"
+              class="absolute pointer-events-none border-b-2 border-rose-500/90 shadow-[0_0_8px_rgba(244,63,94,0.8)] flex items-center justify-between px-2"
+              style="top: {cursorTopPercent}%; transform: translateY(-50%); left: 8px; right: 8px;"
             >
               <span class="bg-rose-600 text-white font-mono text-[9px] font-bold px-1 py-0.2 rounded shadow">
                 {formatTime(currentFrame?.time_sec || 0)}
@@ -497,6 +771,15 @@
               <span class="bg-rose-950/80 text-rose-300 font-mono text-[9px] px-1 py-0.2 rounded border border-rose-500/30">
                 Frame {currentFrameIndex + 1}/{spectrumData.frames.length}
               </span>
+            </div>
+          {/if}
+
+          <!-- Frequency Axis Labels at bottom of Waterfall -->
+          {#if spectrumData.freq_labels && spectrumData.freq_labels.length > 0}
+            <div class="flex justify-between text-[9px] font-mono text-slate-400 px-9 pt-1 border-t border-slate-800/60 mt-1">
+              {#each spectrumData.freq_labels as lbl}
+                <span>{lbl}</span>
+              {/each}
             </div>
           {/if}
         </div>
