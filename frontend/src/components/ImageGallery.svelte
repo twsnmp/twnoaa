@@ -15,6 +15,7 @@
   let activeChannel = $state('full')
   let currentImageBase64 = $state('')
   let recordToDelete = $state(null)
+  let showBatchDeleteModal = $state(false)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
   let detailViewTab = $state('image') // 'image' | 'signal' | 'compare' | 'audio' | 'spectrum'
@@ -70,9 +71,14 @@
     detailViewTab = 'compare'
   }
 
+  function selectAll() {
+    selectedRecordIds = records.map(r => r.id)
+  }
+
   function clearSelection() {
     selectedRecordIds = []
   }
+
 
   async function handleOpenAndPlayWAV() {
     if (window.go?.main?.App?.SelectWAVFile) {
@@ -366,6 +372,7 @@
 
     // Optimistically update frontend state immediately for responsive UI
     records = records.filter(r => r.id !== recId)
+    selectedRecordIds = selectedRecordIds.filter(x => x !== recId)
     if (selectedRecord?.id === recId) {
       selectedRecord = records.length > 0 ? records[0] : null
     }
@@ -383,6 +390,48 @@
   function cancelDelete() {
     recordToDelete = null
   }
+
+  function promptBatchDelete() {
+    if (selectedRecordIds.length === 0) return
+    showBatchDeleteModal = true
+  }
+
+  function cancelBatchDelete() {
+    showBatchDeleteModal = false
+  }
+
+  async function confirmBatchDelete() {
+    if (selectedRecordIds.length === 0) {
+      showBatchDeleteModal = false
+      return
+    }
+    const idsToDelete = [...selectedRecordIds]
+    showBatchDeleteModal = false
+
+    // Optimistically update frontend state immediately for responsive UI
+    const idSet = new Set(idsToDelete)
+    records = records.filter(r => !idSet.has(r.id))
+    selectedRecordIds = []
+    if (selectedRecord && idSet.has(selectedRecord.id)) {
+      selectedRecord = records.length > 0 ? records[0] : null
+    }
+
+    if (window.go?.main?.App) {
+      try {
+        if (window.go.main.App.DeletePassRecords) {
+          await window.go.main.App.DeletePassRecords(idsToDelete)
+        } else {
+          for (const id of idsToDelete) {
+            await window.go.main.App.DeletePassRecord(id)
+          }
+        }
+        await loadRecords()
+      } catch (err) {
+        console.error("Failed to batch delete records:", err)
+      }
+    }
+  }
+
 
   onMount(() => {
     loadRecords()
@@ -538,7 +587,7 @@
           <div class="ml-auto flex items-center gap-1">
             <button
               type="button"
-              onclick={selectAllWithData}
+              onclick={selectAll}
               class="px-1.5 py-0.5 text-slate-400 hover:text-slate-200 text-[10px] transition-colors cursor-pointer"
             >
               {i18n.t('gallery.selectAll')}
@@ -553,6 +602,40 @@
             </button>
           </div>
         </div>
+
+        <!-- Batch Actions Bar when items are selected -->
+        {#if selectedRecordIds.length > 0}
+          <div class="flex items-center justify-between bg-red-950/25 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs transition-all">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center justify-center px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-300 font-mono text-[11px] font-bold border border-red-500/30">
+                {selectedRecordIds.length}
+              </span>
+              <span class="text-[11px] font-medium text-slate-200">
+                {i18n.t('gallery.selectedCount', { count: selectedRecordIds.length })}
+              </span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick={clearSelection}
+                class="px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+              >
+                {i18n.t('gallery.clearSelection')}
+              </button>
+              <button
+                type="button"
+                onclick={promptBatchDelete}
+                class="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1.5 shadow-sm shadow-red-600/30 active:scale-95 transition-all cursor-pointer"
+                title={i18n.t('gallery.batchDelete')}
+              >
+                <Trash2 class="w-3 h-3" />
+                <span>{i18n.t('gallery.batchDeleteBtn', { count: selectedRecordIds.length })}</span>
+              </button>
+            </div>
+          </div>
+        {/if}
+
 
         <!-- Pass Items List -->
         <div class="space-y-2 flex-1 overflow-y-auto pr-1">
@@ -925,6 +1008,54 @@
     </div>
   </div>
 {/if}
+
+<!-- Batch Delete Confirmation Modal -->
+{#if showBatchDeleteModal && selectedRecordIds.length > 0}
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-red-400">
+          <div class="p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <Trash2 class="w-5 h-5 text-red-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('gallery.batchDelete')}</h3>
+            <p class="text-xs text-slate-400 mt-0.5">{i18n.t('gallery.selectedCount', { count: selectedRecordIds.length })}</p>
+          </div>
+        </div>
+        <button
+          onclick={cancelBatchDelete}
+          class="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed">
+        {i18n.t('gallery.batchDeleteConfirm', { count: selectedRecordIds.length })}
+      </p>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onclick={cancelBatchDelete}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+        <button
+          type="button"
+          onclick={confirmBatchDelete}
+          class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-red-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+        >
+          <Trash2 class="w-4 h-4" />
+          {i18n.t('gallery.batchDelete')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 
 <!-- Standalone WAV Audio Playback Modal -->
 {#if showStandaloneAudioModal && standaloneWavPath}

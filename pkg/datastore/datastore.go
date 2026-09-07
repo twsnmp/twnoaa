@@ -339,3 +339,25 @@ func (s *Store) DeleteRecord(id string) error {
 		return b.Delete([]byte(id))
 	})
 }
+
+func (s *Store) DeleteRecords(ids []string) error {
+	if s == nil || s.conn == nil {
+		return fmt.Errorf("datastore is not initialized")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.conn.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketRecords)
+		if b == nil {
+			return nil
+		}
+		for _, id := range ids {
+			if err := b.Delete([]byte(id)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

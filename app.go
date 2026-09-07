@@ -650,6 +650,39 @@ func (a *App) DeletePassRecord(recordID string) string {
 	return "Record deleted successfully"
 }
 
+func (a *App) DeletePassRecords(recordIDs []string) string {
+	if len(recordIDs) == 0 {
+		return "No records specified"
+	}
+	idMap := make(map[string]bool, len(recordIDs))
+	for _, id := range recordIDs {
+		idMap[id] = true
+	}
+
+	records := a.store.GetRecords()
+	for _, r := range records {
+		if idMap[r.ID] {
+			if r.ImagePath != "" {
+				_ = os.Remove(r.ImagePath)
+			}
+			if r.ChannelA != "" {
+				_ = os.Remove(r.ChannelA)
+			}
+			if r.ChannelB != "" {
+				_ = os.Remove(r.ChannelB)
+			}
+			if r.AudioPath != "" {
+				_ = os.Remove(r.AudioPath)
+			}
+		}
+	}
+	if err := a.store.DeleteRecords(recordIDs); err != nil {
+		return fmt.Sprintf("Error deleting records: %v", err)
+	}
+	return "Records deleted successfully"
+}
+
+
 // SelectAndDecodeWAV opens a file dialog to select a WAV file and decode it
 func (a *App) SelectAndDecodeWAV() string {
 	if a.ctx == nil {

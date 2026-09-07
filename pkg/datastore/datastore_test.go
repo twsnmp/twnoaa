@@ -127,4 +127,19 @@ func TestDatastoreBbolt(t *testing.T) {
 	if recordsAfterDelete[0].ID != rec2.ID {
 		t.Errorf("Expected remaining record to be rec2 (%s), got %s", rec2.ID, recordsAfterDelete[0].ID)
 	}
+
+	// 6. Delete multiple records
+	rec3 := &PassRecord{
+		ID:        "test-pass-003",
+		SatName:   "NOAA 18",
+		Timestamp: time.Now().Add(2 * time.Minute),
+	}
+	_ = store.AddRecord(rec3)
+	if err := store.DeleteRecords([]string{rec2.ID, rec3.ID}); err != nil {
+		t.Fatalf("Failed to delete records: %v", err)
+	}
+	if len(store.GetRecords()) != 0 {
+		t.Errorf("Expected 0 records after batch delete, got %d", len(store.GetRecords()))
+	}
 }
+

@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/jpoirier/gortlsdr v2.10.0+incompatible
 	github.com/tmc/langchaingo v0.1.14
-	github.com/wailsapp/wails/v2 v2.12.0
+	github.com/wailsapp/wails/v2 v2.15.0
 	go.etcd.io/bbolt v1.4.0
 )
 
