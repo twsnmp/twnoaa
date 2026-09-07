@@ -10,6 +10,13 @@
   let autoGain = $state(false)
   let biasTee = $state(false)
   let forceSim = $state(false)
+  let sampleRate = $state(2080000)
+
+  const SATELLITE_LIST = [
+    { id: 'noaa19', name: 'NOAA 19', freq: 137100000, displayFreq: '137.100' },
+    { id: 'noaa15', name: 'NOAA 15', freq: 137620000, displayFreq: '137.620' },
+    { id: 'noaa18', name: 'NOAA 18', freq: 137912500, displayFreq: '137.9125' }
+  ]
 
   let sdrInfo = $state({ count: 0, name: 'Scanning...', is_present: false })
   let isStreaming = $state(false)
@@ -24,6 +31,52 @@
 
   let canvasEl
   let ctx
+
+  let freqMarkers = $derived.by(() => {
+    const curFreq = Number(centerFreq)
+    const span = sampleRate || 2080000
+    const startFreq = curFreq - span / 2
+    const endFreq = curFreq + span / 2
+
+    // Check if the current center frequency matches one of the NOAA satellite frequencies
+    const isSatTuned = SATELLITE_LIST.some(s => s.freq === curFreq)
+
+    if (isSatTuned) {
+      // Show all satellites that fall within the current bandwidth
+      const markers = []
+      for (const sat of SATELLITE_LIST) {
+        if (sat.freq >= startFreq && sat.freq <= endFreq) {
+          const ratio = (sat.freq - startFreq) / span
+          const isPrimary = sat.freq === curFreq
+          markers.push({
+            name: sat.name,
+            freq: sat.freq,
+            displayFreq: `${sat.displayFreq} MHz`,
+            ratio: ratio,
+            percent: ratio * 100,
+            isPrimary: isPrimary,
+            color: isPrimary ? '#10b981' : '#38bdf8',
+            badgeBg: isPrimary
+              ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300'
+              : 'bg-sky-950/90 border-sky-500 text-sky-300'
+          })
+        }
+      }
+      return markers
+    } else {
+      // Custom frequency: only show the center reference frequency line
+      return [{
+        name: i18n.t('sdr.centerFreqMarker') || 'Center',
+        freq: curFreq,
+        displayFreq: `${(curFreq / 1e6).toFixed(4)} MHz`,
+        ratio: 0.5,
+        percent: 50,
+        isPrimary: true,
+        color: '#10b981',
+        badgeBg: 'bg-emerald-950/90 border-emerald-500 text-emerald-300'
+      }]
+    }
+  })
 
   function getDeviceDisplayName(info) {
     if (!info) return ''
@@ -51,6 +104,7 @@
           if (cfg.tuner_gain !== undefined) tunerGain = cfg.tuner_gain
           if (cfg.tuner_gain_auto !== undefined) autoGain = cfg.tuner_gain_auto
           if (cfg.bias_tee !== undefined) biasTee = cfg.bias_tee
+          if (cfg.sample_rate) sampleRate = cfg.sample_rate
         }
       } catch (err) {
         console.error("Failed to load config:", err)
@@ -481,8 +535,16 @@
           {i18n.t('sdr.waterfall')}
         </h3>
 
-        <div class="flex items-center gap-2 text-xs font-mono text-slate-400">
-          <span>{(centerFreq / 1000000).toFixed(3)} MHz 帯</span>
+        <div class="flex items-center gap-3 text-xs font-mono text-slate-400">
+          <div class="hidden sm:flex items-center gap-2 text-[10px]">
+            {#each freqMarkers as marker}
+              <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full {marker.isPrimary ? 'bg-emerald-400' : 'bg-sky-400'}"></span>
+                <span class="{marker.isPrimary ? 'text-emerald-300 font-bold' : 'text-sky-300'}">{marker.name}</span>
+              </span>
+            {/each}
+          </div>
+          <span class="text-slate-300 font-semibold">{(centerFreq / 1000000).toFixed(3)} MHz 帯</span>
           <span class="w-2 h-2 rounded-full {isStreaming ? 'bg-emerald-400 animate-ping' : 'bg-slate-600'}"></span>
         </div>
       </div>
@@ -495,13 +557,69 @@
           class="w-full h-full object-cover block"
         ></canvas>
 
+        <!-- Frequency Guideline Overlay Layer -->
+        <div class="absolute inset-0 pointer-events-none overflow-hidden select-none">
+          {#each freqMarkers as marker}
+            <!-- Bandwidth Shading for NOAA satellites -->
+            {#if marker.name.startsWith('NOAA')}
+              {@const bwHalfPercent = (20000 / sampleRate) * 100}
+              <div
+                class="absolute top-0 bottom-0 pointer-events-none transition-all duration-300"
+                style="left: {marker.percent - bwHalfPercent}%; width: {bwHalfPercent * 2}%; background-color: {marker.isPrimary ? 'rgba(16, 185, 129, 0.14)' : 'rgba(56, 189, 248, 0.08)'}; border-left: 1px dashed {marker.isPrimary ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.25)'}; border-right: 1px dashed {marker.isPrimary ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.25)'};"
+              ></div>
+            {/if}
+
+            <!-- Vertical Guideline -->
+            <div
+              class="absolute top-0 bottom-0 pointer-events-none -translate-x-1/2 border-l transition-all duration-300"
+              style="left: {marker.percent}%; border-color: {marker.color}; border-left-style: dashed; border-left-width: {marker.isPrimary ? '1.5px' : '1px'}; opacity: {marker.isPrimary ? '0.95' : '0.8'};"
+            ></div>
+
+            <!-- Top Marker Badge -->
+            <div
+              class="absolute top-1.5 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10 transition-all duration-300"
+              style="left: {marker.percent}%;"
+            >
+              <span class="px-2 py-0.5 rounded-md text-[9px] font-mono font-bold border shadow-lg flex items-center gap-1 backdrop-blur-md {marker.badgeBg}">
+                <span class="w-1.5 h-1.5 rounded-full {marker.isPrimary ? 'bg-emerald-400' : 'bg-sky-400'}"></span>
+                <span>{marker.name}</span>
+                <span class="opacity-80 font-normal">({marker.displayFreq})</span>
+              </span>
+              <!-- Down Arrow Pin -->
+              <span
+                class="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px]"
+                style="border-top-color: {marker.color};"
+              ></span>
+            </div>
+
+            <!-- Bottom Marker Pin -->
+            <div
+              class="absolute bottom-1 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10 transition-all duration-300"
+              style="left: {marker.percent}%;"
+            >
+              <!-- Up Arrow Pin -->
+              <span
+                class="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[5px]"
+                style="border-bottom-color: {marker.color};"
+              ></span>
+            </div>
+          {/each}
+        </div>
+
         {#if !isStreaming}
-          <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+          <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
             <Radio class="w-12 h-12 text-slate-600 mb-3" />
             <p class="text-sm font-semibold text-slate-300">{i18n.t('sdr.streamPaused')}</p>
             <p class="text-xs text-slate-500 mt-1">{i18n.t('sdr.streamPausedHint')}</p>
           </div>
         {/if}
+      </div>
+
+      <!-- Frequency Axis Scale at bottom -->
+      <div class="flex justify-between text-[10px] font-mono text-slate-400 px-2 pt-2 border-t border-slate-800/80 mt-2">
+        <span>{((centerFreq - sampleRate / 2) / 1e6).toFixed(3)} MHz</span>
+        <span class="text-cyan-400 font-semibold">{i18n.t('sdr.centerFreq')}: {(centerFreq / 1e6).toFixed(4)} MHz</span>
+        <span>{((centerFreq + sampleRate / 2) / 1e6).toFixed(3)} MHz</span>
       </div>
     </div>
   </div>

@@ -76,7 +76,9 @@ const translations = {
       deviceFound: "RTL-SDR Device #{id} ({count} found)",
       noHardware: "No Hardware (Simulation Mode)",
       autoRecordingInProgress: "Auto-recording {sat} in progress... {seconds}s remaining",
-      recordingBusy: "Recording already in progress"
+      recordingBusy: "Recording already in progress",
+      centerFreqMarker: "Center",
+      satFreqMarker: "Sat Freq"
     },
     gallery: {
       title: "Decoded APT Image Gallery",
@@ -108,7 +110,11 @@ const translations = {
       clickToZoom: "Click image to view full size",
       delete: "Delete Record",
       deleteConfirm: "Are you sure you want to delete this pass record and its image files?",
+      batchDelete: "Batch Delete",
+      batchDeleteConfirm: "Are you sure you want to delete the {count} selected pass records and their image files?",
+      batchDeleteBtn: "Delete Selected ({count})",
       cancel: "Cancel",
+
       imageNotFound: "Image file not found or failed to decode.",
       signalChartTitle: "Signal & Noise History Chart",
       signalHistoryTab: "Signal Graph",
@@ -309,7 +315,9 @@ const translations = {
       deviceFound: "RTL-SDR デバイス #{id} ({count}件検出)",
       noHardware: "SDRハードウェア非検出 (シミュレーションモード)",
       autoRecordingInProgress: "自動録音中 ({sat})... 残り {seconds} 秒",
-      recordingBusy: "録音が既に実行中です"
+      recordingBusy: "録音が既に実行中です",
+      centerFreqMarker: "基準周波数 (中心)",
+      satFreqMarker: "衛星周波数"
     },
     gallery: {
       title: "デコード済み APT 衛星画像ギャラリー",
@@ -341,7 +349,11 @@ const translations = {
       clickToZoom: "クリックで拡大表示",
       delete: "レコード削除",
       deleteConfirm: "この受信履歴と関連画像ファイルを削除しますか？",
+      batchDelete: "一括削除",
+      batchDeleteConfirm: "選択した{count}件の受信履歴と関連画像ファイルを削除しますか？",
+      batchDeleteBtn: "チェックした項目を削除 ({count})",
       cancel: "キャンセル",
+
       imageNotFound: "画像ファイルが存在しないか、受信・復調に失敗したデータです。",
       signalChartTitle: "受信信号 ＆ ノイズ時系列変化グラフ",
       signalHistoryTab: "信号変化グラフ",
@@ -481,7 +493,7 @@ class I18nManager {
     }
   }
 
-  t(path) {
+  t(path, params = {}) {
     const keys = path.split('.')
     let translation = translations[this.currentLocale]
     for (const key of keys) {
@@ -491,8 +503,14 @@ class I18nManager {
         return keys[keys.length - 1]
       }
     }
+    if (typeof translation === 'string' && params && typeof params === 'object') {
+      for (const [k, v] of Object.entries(params)) {
+        translation = translation.replaceAll(`{${k}}`, String(v))
+      }
+    }
     return translation
   }
+
 }
 
 export const i18n = new I18nManager()
