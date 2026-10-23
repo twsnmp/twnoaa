@@ -16,6 +16,8 @@
   const SATELLITE_LIST = [
     { id: 'meteor24', name: 'METEOR-M2 4', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
     { id: 'meteor23', name: 'METEOR-M2 3', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
+    { id: 'iss', name: 'ISS (SSTV)', freq: 145800000, displayFreq: '145.800', active: true, mode: 'SSTV' },
+    { id: 'sonate2', name: 'SONATE-2 (SSTV)', freq: 145880000, displayFreq: '145.880', active: true, mode: 'SSTV' },
     { id: 'noaa19', name: 'NOAA 19', freq: 137100000, displayFreq: '137.100', active: false, mode: 'APT (EOL)' },
     { id: 'noaa15', name: 'NOAA 15', freq: 137620000, displayFreq: '137.620', active: false, mode: 'APT (EOL)' },
     { id: 'noaa18', name: 'NOAA 18', freq: 137912500, displayFreq: '137.9125', active: false, mode: 'APT (EOL)' }
@@ -240,8 +242,8 @@
 
     try {
       let satName = selectedSatName
-      if (!satName) {
-        satName = centerFreq === 137900000 ? 'METEOR-M2 4' : (centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19'))
+      if (!satName || (satName.includes('SSTV') && centerFreq < 144000000) || (!satName.includes('SSTV') && centerFreq >= 144000000)) {
+        satName = centerFreq === 145800000 ? 'ISS (SSTV)' : (centerFreq === 145880000 ? 'SONATE-2 (SSTV)' : (centerFreq === 137900000 ? 'METEOR-M2 4' : (centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19'))))
       }
       const err = await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, totalDuration, Number(tunerGain), autoGain)
       if (err) {
@@ -431,6 +433,29 @@
             <span class="block text-[10px] font-mono text-emerald-300">137.900 (LRPT)</span>
           </button>
         </div>
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <button
+            onclick={() => tunePreset(145800000, 'ISS (SSTV)')}
+            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 145800000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
+          >
+            ISS (SSTV)
+            <span class="block text-[10px] font-mono text-purple-300">145.800 (SSTV)</span>
+          </button>
+
+          <button
+            onclick={() => tunePreset(145880000, 'SONATE-2 (SSTV)')}
+            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 145880000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
+          >
+            SONATE-2
+            <span class="block text-[10px] font-mono text-purple-300">145.880 (SSTV)</span>
+          </button>
+        </div>
+        {#if centerFreq >= 144000000 && biasTee && !forceSim}
+          <div class="mb-2 p-2 rounded-xl bg-amber-950/60 border border-amber-500/40 text-[10px] text-amber-200 flex items-start gap-1.5">
+            <AlertCircle class="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+            <span>145MHz帯(SSTV)を実機受信する際は、137MHz用SAWフィルター付きLNAが145MHzを減衰させるため、LNAを外してアンテナ直結(Bias-T OFF)または「シミュレーション強制」でテストしてください。</span>
+          </div>
+        {/if}
         <div class="grid grid-cols-3 gap-2">
           <button
             onclick={() => tunePreset(137620000, 'NOAA 15')}

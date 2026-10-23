@@ -113,7 +113,7 @@
           </span>
         {/if}
       </h2>
-      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3 / M2 4 (137.900 MHz LRPT 稼働中) • NOAA 15 / 18 / 19 (2025年運用終了・停波済)</p>
+      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3/4 (137.900 MHz LRPT) • ISS (145.800 MHz SSTV) • SONATE-2 (145.880 MHz SSTV) • NOAA 15/18/19 (停波済)</p>
     </div>
 
     <button

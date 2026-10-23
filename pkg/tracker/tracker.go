@@ -25,6 +25,8 @@ type SatelliteInfo struct {
 var TargetSatellites = []SatelliteInfo{
 	{Name: "METEOR-M2 3", NORADID: "57166", Frequency: 137900000, FreqMHz: 137.900, Mode: "LRPT", Operational: true},
 	{Name: "METEOR-M2 4", NORADID: "59051", Frequency: 137900000, FreqMHz: 137.900, Mode: "LRPT", Operational: true},
+	{Name: "ISS (SSTV)", NORADID: "25544", Frequency: 145800000, FreqMHz: 145.800, Mode: "SSTV", Operational: true},
+	{Name: "SONATE-2 (SSTV)", NORADID: "59112", Frequency: 145880000, FreqMHz: 145.880, Mode: "SSTV", Operational: true},
 	{Name: "NOAA 15", NORADID: "25338", Frequency: 137620000, FreqMHz: 137.620, Mode: "APT", Operational: false},
 	{Name: "NOAA 18", NORADID: "28654", Frequency: 137912500, FreqMHz: 137.9125, Mode: "APT", Operational: false},
 	{Name: "NOAA 19", NORADID: "33591", Frequency: 137100000, FreqMHz: 137.100, Mode: "APT", Operational: false},
@@ -36,6 +38,10 @@ var FallbackTLEs = map[string]string{
 	"57166_2": "2 57166  98.5937 346.5899 0004466 150.2252 209.9182 14.24054645172465",
 	"59051_1": "1 59051U 24039A   26294.30610602  .00000021  00000+0  29259-4 0  9992",
 	"59051_2": "2 59051  98.7193 252.1149 0007319 156.7347 203.4163 14.22440844137199",
+	"25544_1": "1 25544U 98067A   26294.04791053  .00009575  00000+0  18188-3 0  9996",
+	"25544_2": "2 25544  51.6327  37.2623 0006759 289.5321  70.4938 15.48967427591263",
+	"59112_1": "1 59112U 24043Q   26293.43366991  .00067999  00000+0  56417-3 0  9999",
+	"59112_2": "2 59112  97.5637  92.6151 0004604  94.8533 265.3254 15.69986732147462",
 	"25338_1": "1 25338U 98030A   26227.87321262  .00000085  00000+0  65761-4 0  9993",
 	"25338_2": "2 25338  98.7183 286.3210 0011540  89.4120 270.8120 14.25983120421832",
 	"28654_1": "1 28654U 05018A   26227.85412093  .00000092  00000+0  78210-4 0  9997",
@@ -115,31 +121,31 @@ func GetIPLocation() (*IPLocation, error) {
 func (t *Tracker) FetchTLEs() error {
 	urls := []string{
 		"https://celestrak.org/NORAD/elements/gp.php?GROUP=weather&FORMAT=TLE",
-		"https://celestrak.org/NORAD/elements/weather.txt",
+		"https://celestrak.org/NORAD/elements/gp.php?GROUP=amateur&FORMAT=TLE",
+		"https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE",
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	var body []byte
+	var allLines []string
 
 	for _, u := range urls {
 		resp, err := client.Get(u)
 		if err == nil && resp.StatusCode == 200 {
-			body, _ = io.ReadAll(resp.Body)
+			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if len(body) > 0 {
-				break
+			if len(b) > 0 {
+				allLines = append(allLines, strings.Split(strings.TrimSpace(string(b)), "\n")...)
 			}
-		}
-		if resp != nil {
+		} else if resp != nil {
 			resp.Body.Close()
 		}
 	}
 
-	if len(body) == 0 {
+	if len(allLines) == 0 {
 		return fmt.Errorf("using offline fallback TLEs")
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	lines := allLines
 	newMap := make(map[string]string)
 
 	for i := 0; i < len(lines); i++ {

@@ -274,6 +274,7 @@ func (s *SDR) runSimulationLoop() {
 
 	t := 0.0
 	subcarrierFreq := 2400.0 // APT 2400Hz AM subcarrier
+	sstvSubPhase := 0.0      // SSTV FM audio subcarrier phase
 	phase := 0.0
 
 	for {
@@ -284,6 +285,7 @@ func (s *SDR) runSimulationLoop() {
 			s.mu.Lock()
 			currentGain := s.gain
 			currentAutoGain := s.autoGain
+			currentFreq := s.centerFreq
 			s.mu.Unlock()
 
 			// Scale signal and noise by gain factor (1.0 at 40.0 dB / 400)
@@ -295,85 +297,136 @@ func (s *SDR) runSimulationLoop() {
 				}
 			}
 
-			// Synthesize realistic simulated APT IQ signal with Earth/cloud imagery, telemetry wedges, and Sync A/B
-			for i := 0; i < bufSize/2; i++ {
-				// 0.5 sec line period (2 lines per second, 2080 words per line)
-				lineNum := int(t * 2.0)
-				linePhase := math.Mod(t*2.0, 1.0)
-				wordIdx := int(linePhase * 2080.0)
-				var videoVal float64
+			isSSTV := currentFreq >= 144000000
 
-				if wordIdx < 39 {
-					// Sync A: 7 cycles of 1040 Hz square wave (wordRate=4160Hz -> 4 words per cycle, 28 words active)
-					if wordIdx >= 4 && wordIdx < 32 && ((wordIdx-4)%4 < 2) {
-						videoVal = 0.95
+			for i := 0; i < bufSize/2; i++ {
+				var sub float64
+				if isSSTV {
+					// Simulate Robot 36 color SSTV (150ms per line, 320x240)
+					linePeriod := 0.150
+					lineNum := int(t / linePeriod)
+					lineTime := math.Mod(t, linePeriod)
+					ny := math.Mod(float64(lineNum)/60.0, 1.0)
+					isEven := (lineNum % 2) == 0
+
+					var toneFreq float64
+					if lineTime < 0.009 {
+						toneFreq = 1200.0 // 9ms Horizontal Sync Pulse
+					} else if lineTime < 0.012 {
+						toneFreq = 1500.0 // 3ms Porch
+					} else if lineTime < 0.100 {
+						// 88ms Luminance (Y) scan
+						nx := (lineTime - 0.012) / 0.088
+						r, g, b := simSSTVSceneRGB(nx, ny)
+						yVal := 0.299*r + 0.587*g + 0.114*b
+						toneFreq = 1500.0 + yVal*800.0
+					} else if lineTime < 0.1045 {
+						if isEven {
+							toneFreq = 1500.0
+						} else {
+							toneFreq = 2300.0
+						}
+					} else if lineTime < 0.106 {
+						toneFreq = 1900.0
 					} else {
-						videoVal = 0.05
+						// 44ms Chrominance (R-Y on even lines, B-Y on odd lines)
+						nx := (lineTime - 0.106) / 0.044
+						r, g, b := simSSTVSceneRGB(nx, ny)
+						yVal := 0.299*r + 0.587*g + 0.114*b
+						var cNorm float64
+						if isEven {
+							cr := 0.5 + (r-yVal)/1.402
+							cNorm = math.Max(0, math.Min(1, cr))
+						} else {
+							cb := 0.5 + (b-yVal)/1.772
+							cNorm = math.Max(0, math.Min(1, cb))
+						}
+						toneFreq = 1500.0 + cNorm*800.0
 					}
-				} else if wordIdx < 86 {
-					// Space A + minute marker every 120 lines
-					if lineNum%120 < 4 {
-						videoVal = 0.90
-					} else {
-						videoVal = 0.08
+
+					sstvSubPhase += 2.0 * math.Pi * toneFreq / float64(s.sampleRate)
+					if sstvSubPhase > 2.0*math.Pi {
+						sstvSubPhase -= 2.0 * math.Pi
 					}
-				} else if wordIdx < 995 {
-					// Channel A (Visible): Simulated cloud vortices, frontal band, and landmass
-					nx := float64(wordIdx-86) / 909.0
-					ny := float64(lineNum) / 120.0
-					// Cyclone vortex + cloud bands
-					dx := nx - 0.52
-					dy := math.Mod(ny, 1.5) - 0.75
-					dist := math.Sqrt(dx*dx + dy*dy)
-					angle := math.Atan2(dy, dx)
-					spiral := math.Sin(angle*2.0 - dist*18.0 + ny*2.0)
-					swirl := math.Exp(-dist*3.8) * (0.55 + 0.45*spiral)
-					front := math.Exp(-math.Pow((nx-0.25-0.35*math.Sin(ny*1.8))*5.0, 2)) * (0.6 + 0.3*math.Cos(nx*25.0+ny*8.0))
-					land := 0.15 + 0.12*math.Sin(nx*7.0)*math.Cos(ny*4.5)
-					videoVal = math.Max(0.08, math.Min(0.95, land+swirl*0.65+front*0.45))
-				} else if wordIdx < 1040 {
-					// Telemetry A: 16-step grayscale calibration wedge (8 lines per wedge step)
-					step := (lineNum / 8) % 16
-					videoVal = 0.08 + 0.85*(float64(step)/15.0)
-				} else if wordIdx < 1079 {
-					// Sync B: 7 pulses at 832 Hz (5 words per cycle, 35 words active)
-					wb := wordIdx - 1040
-					if wb >= 2 && wb < 37 && ((wb-2)%5 < 3) {
-						videoVal = 0.95
-					} else {
-						videoVal = 0.05
-					}
-				} else if wordIdx < 1126 {
-					// Space B
-					if lineNum%120 < 4 {
-						videoVal = 0.08
-					} else {
-						videoVal = 0.88
-					}
-				} else if wordIdx < 2035 {
-					// Channel B (Thermal Infrared): Cloud top temperatures + sea/land thermal gradient
-					nx := float64(wordIdx-1126) / 909.0
-					ny := float64(lineNum) / 120.0
-					dx := nx - 0.52
-					dy := math.Mod(ny, 1.5) - 0.75
-					dist := math.Sqrt(dx*dx + dy*dy)
-					angle := math.Atan2(dy, dx)
-					spiral := math.Sin(angle*2.0 - dist*18.0 + ny*2.0)
-					swirl := math.Exp(-dist*3.2) * (0.65 + 0.35*spiral)
-					front := math.Exp(-math.Pow((nx-0.25-0.35*math.Sin(ny*1.8))*4.2, 2)) * 0.75
-					thermalGrad := 0.22 + 0.15*math.Cos(ny*1.2) - 0.08*math.Sin(nx*5.0)
-					videoVal = math.Max(0.10, math.Min(0.96, thermalGrad+swirl*0.70+front*0.50))
+					sub = 0.85 * math.Sin(sstvSubPhase)
 				} else {
-					// Telemetry B: 16-step grayscale wedge
-					step := (lineNum / 8) % 16
-					videoVal = 0.08 + 0.85*(float64(step)/15.0)
+					// 0.5 sec line period (2 lines per second, 2080 words per line)
+					lineNum := int(t * 2.0)
+					linePhase := math.Mod(t*2.0, 1.0)
+					wordIdx := int(linePhase * 2080.0)
+					var videoVal float64
+
+					if wordIdx < 39 {
+						// Sync A: 7 cycles of 1040 Hz square wave (wordRate=4160Hz -> 4 words per cycle, 28 words active)
+						if wordIdx >= 4 && wordIdx < 32 && ((wordIdx-4)%4 < 2) {
+							videoVal = 0.95
+						} else {
+							videoVal = 0.05
+						}
+					} else if wordIdx < 86 {
+						// Space A + minute marker every 120 lines
+						if lineNum%120 < 4 {
+							videoVal = 0.90
+						} else {
+							videoVal = 0.08
+						}
+					} else if wordIdx < 995 {
+						// Channel A (Visible): Simulated cloud vortices, frontal band, and landmass
+						nx := float64(wordIdx-86) / 909.0
+						ny := float64(lineNum) / 120.0
+						dx := nx - 0.52
+						dy := math.Mod(ny, 1.5) - 0.75
+						dist := math.Sqrt(dx*dx + dy*dy)
+						angle := math.Atan2(dy, dx)
+						spiral := math.Sin(angle*2.0 - dist*18.0 + ny*2.0)
+						swirl := math.Exp(-dist*3.8) * (0.55 + 0.45*spiral)
+						front := math.Exp(-math.Pow((nx-0.25-0.35*math.Sin(ny*1.8))*5.0, 2)) * (0.6 + 0.3*math.Cos(nx*25.0+ny*8.0))
+						land := 0.15 + 0.12*math.Sin(nx*7.0)*math.Cos(ny*4.5)
+						videoVal = math.Max(0.08, math.Min(0.95, land+swirl*0.65+front*0.45))
+					} else if wordIdx < 1040 {
+						// Telemetry A: 16-step grayscale calibration wedge (8 lines per wedge step)
+						step := (lineNum / 8) % 16
+						videoVal = 0.08 + 0.85*(float64(step)/15.0)
+					} else if wordIdx < 1079 {
+						// Sync B: 7 pulses at 832 Hz (5 words per cycle, 35 words active)
+						wb := wordIdx - 1040
+						if wb >= 2 && wb < 37 && ((wb-2)%5 < 3) {
+							videoVal = 0.95
+						} else {
+							videoVal = 0.05
+						}
+					} else if wordIdx < 1126 {
+						// Space B
+						if lineNum%120 < 4 {
+							videoVal = 0.08
+						} else {
+							videoVal = 0.88
+						}
+					} else if wordIdx < 2035 {
+						// Channel B (Thermal Infrared): Cloud top temperatures + sea/land thermal gradient
+						nx := float64(wordIdx-1126) / 909.0
+						ny := float64(lineNum) / 120.0
+						dx := nx - 0.52
+						dy := math.Mod(ny, 1.5) - 0.75
+						dist := math.Sqrt(dx*dx + dy*dy)
+						angle := math.Atan2(dy, dx)
+						spiral := math.Sin(angle*2.0 - dist*18.0 + ny*2.0)
+						swirl := math.Exp(-dist*3.2) * (0.65 + 0.35*spiral)
+						front := math.Exp(-math.Pow((nx-0.25-0.35*math.Sin(ny*1.8))*4.2, 2)) * 0.75
+						thermalGrad := 0.22 + 0.15*math.Cos(ny*1.2) - 0.08*math.Sin(nx*5.0)
+						videoVal = math.Max(0.10, math.Min(0.96, thermalGrad+swirl*0.70+front*0.50))
+					} else {
+						// Telemetry B: 16-step grayscale wedge
+						step := (lineNum / 8) % 16
+						videoVal = 0.08 + 0.85*(float64(step)/15.0)
+					}
+
+					// AM modulation on 2400Hz subcarrier
+					sub = videoVal * math.Sin(2*math.Pi*subcarrierFreq*t)
 				}
 
-				// AM modulation on 2400Hz subcarrier
-				sub := videoVal * math.Sin(2*math.Pi*subcarrierFreq*t)
-
-				// WFM modulation: instantaneous frequency deviation is proportional to subcarrier audio
-				maxDev := 17000.0 // +/- 17 kHz WFM deviation for NOAA APT
+				// FM modulation: instantaneous frequency deviation is proportional to subcarrier audio
+				maxDev := 17000.0 // +/- 17 kHz FM deviation
 				phase += 2.0 * math.Pi * (maxDev * sub) / float64(s.sampleRate)
 				if phase > 2.0*math.Pi {
 					phase -= 2.0 * math.Pi
@@ -398,6 +451,60 @@ func (s *SDR) runSimulationLoop() {
 			s.broadcast(chunk)
 		}
 	}
+}
+
+// simSSTVSceneRGB generates a synthetic color space-station & Earth horizon test card for SSTV simulation
+func simSSTVSceneRGB(nx, ny float64) (r, g, b float64) {
+	// Top 18%: SMPTE-style color bar header
+	if ny < 0.18 {
+		bar := int(nx * 7.0)
+		switch bar {
+		case 0:
+			return 0.92, 0.92, 0.92 // White
+		case 1:
+			return 0.92, 0.92, 0.10 // Yellow
+		case 2:
+			return 0.10, 0.92, 0.92 // Cyan
+		case 3:
+			return 0.10, 0.90, 0.20 // Green
+		case 4:
+			return 0.92, 0.15, 0.85 // Magenta
+		case 5:
+			return 0.92, 0.15, 0.15 // Red
+		default:
+			return 0.15, 0.25, 0.95 // Blue
+		}
+	}
+
+	// Curved blue Earth limb at bottom + deep space + golden solar panels
+	earthCenterY := 1.45
+	dx := nx - 0.5
+	dy := ny - earthCenterY
+	distEarth := math.Sqrt(dx*dx + dy*dy)
+
+	if distEarth < 0.82 {
+		// Blue ocean + white cloud swirls
+		cloud := 0.5 + 0.5*math.Sin(nx*18.0+math.Cos(ny*12.0)*2.5)*math.Cos(ny*15.0)
+		r = 0.08 + 0.75*math.Pow(cloud, 2.2)
+		g = 0.35 + 0.55*math.Pow(cloud, 1.8)
+		b = 0.82 + 0.16*cloud
+		return
+	} else if distEarth < 0.86 {
+		// Cyan atmospheric glow
+		glow := 1.0 - (distEarth-0.82)/0.04
+		return 0.15 * glow, 0.65 * glow, 0.98 * glow
+	}
+
+	// Space background with ISS solar array silhouette
+	if math.Abs(ny-0.42) < 0.14 && ((nx > 0.18 && nx < 0.34) || (nx > 0.66 && nx < 0.82)) {
+		// Golden solar panels
+		return 0.85, 0.62, 0.12
+	}
+	if math.Abs(ny-0.42) < 0.04 && nx >= 0.30 && nx <= 0.70 {
+		// Metallic truss / module
+		return 0.82, 0.85, 0.90
+	}
+	return 0.04, 0.05, 0.12
 }
 
 func (s *SDR) broadcast(buf []byte) {

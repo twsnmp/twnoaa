@@ -110,6 +110,11 @@ func (a *App) startAutoRecordScheduler() {
 
 			now := time.Now()
 			for _, sat := range states {
+				// Auto-record scheduler prioritizes 137 MHz weather satellites when Bias-Tee (137 MHz SAW LNA) is enabled,
+				// because the 137 MHz SAW filter blocks 145.8 MHz SSTV unless Bias-Tee / LNA is bypassed.
+				if cfg.BiasTee && sat.Frequency > 140000000 {
+					continue
+				}
 				if sat.IsActive { // Elevation >= 5.0°
 					passKey := fmt.Sprintf("%s_%s", sat.Name, now.Format("20060102_15"))
 
@@ -436,7 +441,11 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 
 		var res *decoder.DecodeResult
 		var err error
-		if isLRPTSat && rawIQPath != "" {
+		upperSat := strings.ToUpper(satName)
+		isSSTVSat := freq >= 144000000 || strings.Contains(upperSat, "ISS") || strings.Contains(upperSat, "SONATE") || strings.Contains(upperSat, "SSTV")
+		if isSSTVSat {
+			res, err = decoder.DecodeSSTV(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
+		} else if isLRPTSat && rawIQPath != "" {
 			res, err = decoder.DecodeLRPT(rawIQPath, cfg.SampleRate, cfg.DataDir+"/images", baseName)
 		} else {
 			res, err = decoder.DecodeAPT(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
@@ -740,7 +749,16 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 	logger.Infof("APP", "Starting WAV test decode: file=%s, baseName=%s", wavPath, baseName)
 
 	go func() {
-		res, err := decoder.DecodeWAVFile(wavPath, outDir, baseName)
+		upperBase := strings.ToUpper(base)
+		var res *decoder.DecodeResult
+		var err error
+		freq := 137100000
+		if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") || strings.Contains(upperBase, "PD120") || strings.Contains(upperBase, "ROBOT") || strings.Contains(upperBase, "MARTIN") {
+			freq = 145800000
+			res, err = decoder.DecodeSSTVWAVFile(wavPath, outDir, baseName)
+		} else {
+			res, err = decoder.DecodeWAVFile(wavPath, outDir, baseName)
+		}
 		if err != nil {
 			logger.Errorf("APP", "WAV decode failed: %v", err)
 			if a.ctx != nil {
@@ -752,7 +770,7 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 		record := &datastore.PassRecord{
 			ID:             baseName,
 			SatName:        satName,
-			Frequency:      137100000, // Default NOAA frequency
+			Frequency:      freq,
 			Timestamp:      time.Now(),
 			ObserverLat:    cfg.ObserverLat,
 			ObserverLon:    cfg.ObserverLon,
@@ -868,7 +886,10 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 		}
 
 		var res *decoder.DecodeResult
-		if strings.Contains(strings.ToUpper(base), "METEOR") {
+		upperBase := strings.ToUpper(base)
+		if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") {
+			res, err = decoder.DecodeSSTV(pcmSamples, 20800, outDir, baseName)
+		} else if strings.Contains(upperBase, "METEOR") {
 			res, err = decoder.DecodeLRPT(iqPath, cfg.SampleRate, outDir, baseName)
 		} else {
 			res, err = decoder.DecodeAPT(pcmSamples, 20800, outDir, baseName)
