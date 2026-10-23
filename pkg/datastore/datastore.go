@@ -149,14 +149,14 @@ func (s *Store) initBuckets(baseDir string) error {
 				OllamaURL:          "http://localhost:11434",
 				OllamaModel:        "llama3",
 				AutoAnalyze:        true,
-				CenterFreq:         137100000,
+				CenterFreq:         137900000,
 				SampleRate:         2080000,
-				TunerGain:          400,
+				TunerGain:          144, // 14.4 dB optimal gain for LNA with Bias-T
 				TunerGainAuto:      false,
-				BiasTee:            false,
+				BiasTee:            true,
 				SimulationMode:     false, // Default to hardware mode (falls back automatically if no hardware)
-				AutoRecord:         false, // Default OFF
-				AutoRecordDuration: 30,
+				AutoRecord:         true,
+				AutoRecordDuration: 600,
 				SaveRawIQ:          true,
 				DataDir:            baseDir,
 			}
@@ -195,14 +195,14 @@ func (s *Store) GetConfig() Config {
 		OllamaURL:          "http://localhost:11434",
 		OllamaModel:        "llama3",
 		AutoAnalyze:        true,
-		CenterFreq:         137100000,
+		CenterFreq:         137900000,
 		SampleRate:         2080000,
-		TunerGain:          380, // 38.0 dB optimal gain for dipole antenna without external LNA
+		TunerGain:          144, // 14.4 dB optimal gain for external LNA
 		TunerGainAuto:      false,
-		BiasTee:            false,
+		BiasTee:            true,
 		SimulationMode:     false,
-		AutoRecord:         false,
-		AutoRecordDuration: 30,
+		AutoRecord:         true,
+		AutoRecordDuration: 600,
 		SaveRawIQ:          true,
 	}
 

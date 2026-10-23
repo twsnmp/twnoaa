@@ -4,7 +4,7 @@ node = "20"
 
 [env]
 CGO_CFLAGS = "-I/opt/homebrew/include -I/opt/homebrew/opt/librtlsdr/include -I/usr/local/include"
-CGO_LDFLAGS = "-L/opt/homebrew/lib -L/opt/homebrew/opt/librtlsdr/lib -L/usr/local/lib -lrtlsdr"
+CGO_LDFLAGS = "-L/opt/homebrew/lib -L/opt/homebrew/opt/librtlsdr/lib -L/usr/local/lib -lrtlsdr -framework UniformTypeIdentifiers"
 PKG_CONFIG_PATH = "/opt/homebrew/opt/librtlsdr/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig"
 
 [tasks]

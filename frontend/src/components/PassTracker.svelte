@@ -113,7 +113,7 @@
           </span>
         {/if}
       </h2>
-      <p class="text-xs text-slate-400 mt-0.5">NOAA 15 (137.620 MHz) • NOAA 18 (137.9125 MHz) • NOAA 19 (137.100 MHz)</p>
+      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3 / M2 4 (137.900 MHz LRPT 稼働中) • NOAA 15 / 18 / 19 (2025年運用終了・停波済)</p>
     </div>
 
     <button
@@ -134,23 +134,31 @@
   {/if}
 
   <!-- Realtime Satellite Cards -->
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 flex-shrink-0">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 flex-shrink-0">
     {#each satStates as sat}
-      <div class="bg-slate-900/90 border {sat.is_active ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/10' : 'border-slate-800'} rounded-xl p-3.5 relative overflow-hidden transition-all">
+      <div class="bg-slate-900/90 border {sat.is_active ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/10' : sat.operational === false ? 'border-slate-800/60 opacity-60' : 'border-slate-800'} rounded-xl p-3 relative overflow-hidden transition-all">
         {#if sat.is_active}
-          <div class="absolute top-0 right-0 bg-emerald-500/20 text-emerald-400 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-bl-xl border-l border-b border-emerald-500/30 flex items-center gap-1.5">
+          <div class="absolute top-0 right-0 bg-emerald-500/20 text-emerald-400 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-bl-xl border-l border-b border-emerald-500/30 flex items-center gap-1">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
             {i18n.t('tracker.activePass')}
           </div>
+        {:else if sat.operational === false}
+          <div class="absolute top-0 right-0 bg-slate-800 text-slate-400 text-[9px] font-semibold px-2 py-0.5 rounded-bl-xl border-l border-b border-slate-700">
+            停波済 (EOL)
+          </div>
+        {:else if sat.mode}
+          <div class="absolute top-0 right-0 bg-cyan-500/15 text-cyan-300 text-[9px] font-mono font-bold px-2 py-0.5 rounded-bl-xl border-l border-b border-cyan-500/30">
+            {sat.mode}
+          </div>
         {/if}
 
-        <div class="flex items-center gap-2.5 mb-2.5">
-          <div class="p-2 rounded-lg {sat.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}">
-            <Radio class="w-5 h-5" />
+        <div class="flex items-center gap-2 mb-2">
+          <div class="p-1.5 rounded-lg {sat.is_active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}">
+            <Radio class="w-4 h-4" />
           </div>
-          <div>
-            <h3 class="text-sm font-bold text-slate-100">{sat.name}</h3>
-            <p class="text-[11px] font-mono text-cyan-400">{(sat.frequency / 1e6).toFixed(4)} MHz</p>
+          <div class="min-w-0">
+            <h3 class="text-xs font-bold text-slate-100 truncate">{sat.name}</h3>
+            <p class="text-[10px] font-mono text-cyan-400">{(sat.frequency / 1e6).toFixed(4)} MHz</p>
           </div>
         </div>
 

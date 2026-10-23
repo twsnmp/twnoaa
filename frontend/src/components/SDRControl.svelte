@@ -3,19 +3,22 @@
   import { i18n } from '../i18n.svelte.js'
   import { Radio, Sliders, Play, Square, Disc, AlertCircle, Cpu, Zap } from '@lucide/svelte'
 
-  let { initialFreq = 137100000, initialSat = 'NOAA 19', onDecoded = () => {} } = $props()
+  let { initialFreq = 137900000, initialSat = 'METEOR-M2 4', onDecoded = () => {} } = $props()
 
   let centerFreq = $state(initialFreq)
-  let tunerGain = $state(400)
+  let selectedSatName = $state(initialSat)
+  let tunerGain = $state(144)
   let autoGain = $state(false)
-  let biasTee = $state(false)
+  let biasTee = $state(true)
   let forceSim = $state(false)
   let sampleRate = $state(2080000)
 
   const SATELLITE_LIST = [
-    { id: 'noaa19', name: 'NOAA 19', freq: 137100000, displayFreq: '137.100' },
-    { id: 'noaa15', name: 'NOAA 15', freq: 137620000, displayFreq: '137.620' },
-    { id: 'noaa18', name: 'NOAA 18', freq: 137912500, displayFreq: '137.9125' }
+    { id: 'meteor24', name: 'METEOR-M2 4', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
+    { id: 'meteor23', name: 'METEOR-M2 3', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
+    { id: 'noaa19', name: 'NOAA 19', freq: 137100000, displayFreq: '137.100', active: false, mode: 'APT (EOL)' },
+    { id: 'noaa15', name: 'NOAA 15', freq: 137620000, displayFreq: '137.620', active: false, mode: 'APT (EOL)' },
+    { id: 'noaa18', name: 'NOAA 18', freq: 137912500, displayFreq: '137.9125', active: false, mode: 'APT (EOL)' }
   ]
 
   let sdrInfo = $state({ count: 0, name: 'Scanning...', is_present: false })
@@ -42,14 +45,18 @@
     const isSatTuned = SATELLITE_LIST.some(s => s.freq === curFreq)
 
     if (isSatTuned) {
-      // Show all satellites that fall within the current bandwidth
+      // Show unique satellite frequencies that fall within the current bandwidth
       const markers = []
+      const seenFreqs = new Set()
       for (const sat of SATELLITE_LIST) {
         if (sat.freq >= startFreq && sat.freq <= endFreq) {
+          if (seenFreqs.has(sat.freq)) continue
+          seenFreqs.add(sat.freq)
           const ratio = (sat.freq - startFreq) / span
           const isPrimary = sat.freq === curFreq
+          const labelName = sat.freq === 137900000 ? 'METEOR-M2 3/4' : sat.name
           markers.push({
-            name: sat.name,
+            name: labelName,
             freq: sat.freq,
             displayFreq: `${sat.displayFreq} MHz`,
             ratio: ratio,
@@ -232,7 +239,10 @@
     }, 250)
 
     try {
-      const satName = centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19')
+      let satName = selectedSatName
+      if (!satName) {
+        satName = centerFreq === 137900000 ? 'METEOR-M2 4' : (centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19'))
+      }
       const err = await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, totalDuration, Number(tunerGain), autoGain)
       if (err) {
         throw new Error(err)
@@ -245,8 +255,9 @@
     }
   }
 
-  function tunePreset(freq) {
+  function tunePreset(freq, satName = '') {
     centerFreq = freq
+    if (satName) selectedSatName = satName
     if (isStreaming) {
       handleFreqChange()
     }
@@ -403,29 +414,46 @@
       <!-- Preset Buttons -->
       <div>
         <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-2">{i18n.t('sdr.presets')}</span>
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <button
+            onclick={() => tunePreset(137900000, 'METEOR-M2 3')}
+            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 137900000 && selectedSatName === 'METEOR-M2 3' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-950 border-emerald-800/60 text-slate-200 hover:border-emerald-600'}"
+          >
+            METEOR-M2 3
+            <span class="block text-[10px] font-mono text-emerald-300">137.900 (LRPT)</span>
+          </button>
+
+          <button
+            onclick={() => tunePreset(137900000, 'METEOR-M2 4')}
+            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 137900000 && selectedSatName !== 'METEOR-M2 3' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-slate-950 border-emerald-800/60 text-slate-200 hover:border-emerald-600'}"
+          >
+            METEOR-M2 4
+            <span class="block text-[10px] font-mono text-emerald-300">137.900 (LRPT)</span>
+          </button>
+        </div>
         <div class="grid grid-cols-3 gap-2">
           <button
-            onclick={() => tunePreset(137620000)}
-            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 137620000 ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'}"
+            onclick={() => tunePreset(137620000, 'NOAA 15')}
+            class="py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all opacity-75 {centerFreq === 137620000 ? 'bg-cyan-600 border-cyan-500 text-white opacity-100' : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'}"
           >
-            NOAA 15
-            <span class="block text-[10px] font-mono text-cyan-300">137.620</span>
+            NOAA 15 (停波)
+            <span class="block text-[9px] font-mono text-cyan-300">137.620</span>
           </button>
 
           <button
-            onclick={() => tunePreset(137912500)}
-            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 137912500 ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'}"
+            onclick={() => tunePreset(137912500, 'NOAA 18')}
+            class="py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all opacity-75 {centerFreq === 137912500 ? 'bg-cyan-600 border-cyan-500 text-white opacity-100' : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'}"
           >
-            NOAA 18
-            <span class="block text-[10px] font-mono text-cyan-300">137.9125</span>
+            NOAA 18 (停波)
+            <span class="block text-[9px] font-mono text-cyan-300">137.9125</span>
           </button>
 
           <button
-            onclick={() => tunePreset(137100000)}
-            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 137100000 ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'}"
+            onclick={() => tunePreset(137100000, 'NOAA 19')}
+            class="py-1.5 px-2 rounded-xl text-[11px] font-bold border transition-all opacity-75 {centerFreq === 137100000 ? 'bg-cyan-600 border-cyan-500 text-white opacity-100' : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'}"
           >
-            NOAA 19
-            <span class="block text-[10px] font-mono text-cyan-300">137.100</span>
+            NOAA 19 (停波)
+            <span class="block text-[9px] font-mono text-cyan-300">137.100</span>
           </button>
         </div>
       </div>
@@ -560,9 +588,9 @@
         <!-- Frequency Guideline Overlay Layer -->
         <div class="absolute inset-0 pointer-events-none overflow-hidden select-none">
           {#each freqMarkers as marker}
-            <!-- Bandwidth Shading for NOAA satellites -->
-            {#if marker.name.startsWith('NOAA')}
-              {@const bwHalfPercent = (20000 / sampleRate) * 100}
+            <!-- Bandwidth Shading for NOAA / METEOR satellites -->
+            {#if marker.name.startsWith('NOAA') || marker.name.startsWith('METEOR')}
+              {@const bwHalfPercent = ((marker.name.startsWith('METEOR') ? 40000 : 20000) / sampleRate) * 100}
               <div
                 class="absolute top-0 bottom-0 pointer-events-none transition-all duration-300"
                 style="left: {marker.percent - bwHalfPercent}%; width: {bwHalfPercent * 2}%; background-color: {marker.isPrimary ? 'rgba(16, 185, 129, 0.14)' : 'rgba(56, 189, 248, 0.08)'}; border-left: 1px dashed {marker.isPrimary ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.25)'}; border-right: 1px dashed {marker.isPrimary ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.25)'};"

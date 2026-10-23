@@ -48,6 +48,9 @@
     if (spectrumData.type === 'audio_wav') {
       return 2000 // ±1 kHz for audio subcarrier
     }
+    if (record?.sat_name && record.sat_name.toUpperCase().startsWith('METEOR')) {
+      return 80000 // ±40 kHz for 72kbaud OQPSK LRPT signal bandwidth
+    }
     return 40000 // ±20 kHz for RF APT signal bandwidth
   })
 

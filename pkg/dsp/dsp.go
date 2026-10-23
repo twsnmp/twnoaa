@@ -16,10 +16,13 @@ type DSP struct {
 	targetRate    int
 	decimation    int
 	prevSample    complex128
-	iqLPFState    complex128 // IQ low-pass filter state
+	iqLPFState    complex128 // IQ low-pass filter stage 1 state
+	iqLPFState2   complex128 // IQ low-pass filter stage 2 state
+	iqLPFState3   complex128 // IQ low-pass filter stage 3 state
 	iqDCI         float64    // Running DC estimate for I channel
 	iqDCQ         float64    // Running DC estimate for Q channel
 	dcState       float64    // Audio DC blocker state
+	audioLPFState float64    // Audio low-pass anti-aliasing state
 	iqDecPhase    int        // Phase accumulator for IQ decimation
 	audioDecPhase int        // Phase accumulator for audio decimation
 	audioDecSum   float64    // Running sum for audio decimation boxcar filter
@@ -96,16 +99,24 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 		d.iqDCQ = d.iqDCQ*0.999 + im*0.001
 		cleanIQ := complex(r-d.iqDCI, im-d.iqDCQ)
 
-		// Low-pass filter (~40 kHz cutoff)
+		// 3-stage cascaded Low-pass filter (~40 kHz cutoff) for strong anti-aliasing before 20x decimation
 		d.iqLPFState = complex(
 			real(d.iqLPFState)*alpha+real(cleanIQ)*oneMinusAlpha,
 			imag(d.iqLPFState)*alpha+imag(cleanIQ)*oneMinusAlpha,
+		)
+		d.iqLPFState2 = complex(
+			real(d.iqLPFState2)*alpha+real(d.iqLPFState)*oneMinusAlpha,
+			imag(d.iqLPFState2)*alpha+imag(d.iqLPFState)*oneMinusAlpha,
+		)
+		d.iqLPFState3 = complex(
+			real(d.iqLPFState3)*alpha+real(d.iqLPFState2)*oneMinusAlpha,
+			imag(d.iqLPFState3)*alpha+imag(d.iqLPFState2)*oneMinusAlpha,
 		)
 
 		d.iqDecPhase++
 		if d.iqDecPhase >= iqDec {
 			d.iqDecPhase = 0
-			decimatedIQ = append(decimatedIQ, d.iqLPFState)
+			decimatedIQ = append(decimatedIQ, d.iqLPFState3)
 		}
 	}
 

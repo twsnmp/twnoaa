@@ -34,11 +34,11 @@ type SDR struct {
 
 func NewSDR() *SDR {
 	return &SDR{
-		centerFreq:      137100000,
+		centerFreq:      137900000,
 		sampleRate:      2080000,
-		gain:            400,
+		gain:            144,
 		autoGain:        false,
-		biasTee:         false,
+		biasTee:         true,
 		simulationMode:  false,
 		dataSubscribers: make([]chan []byte, 0),
 	}
@@ -106,13 +106,13 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, biasTee, forceSi
 		} else {
 			s.device = dev
 			s.simulationMode = false
-			dev.SetCenterFreq(freq)
-			dev.SetSampleRate(sampleRate)
-			dev.SetTunerGainMode(!autoGain)
+			_ = dev.SetCenterFreq(freq)
+			_ = dev.SetSampleRate(sampleRate)
+			_ = dev.SetTunerGainMode(!autoGain)
+			_ = dev.SetAgcMode(autoGain)
 			if !autoGain {
-				dev.SetTunerGain(gain)
+				_ = dev.SetTunerGain(gain)
 			}
-			_ = dev.SetOffsetTuning(true)
 
 			// Configure Bias-Tee (4.5V coaxial power for active LNA/antennas)
 			if err := dev.SetBiasTee(biasTee); err != nil {
@@ -121,8 +121,8 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, biasTee, forceSi
 				logger.Infof("SDR", "Bias-Tee (4.5V coaxial power) configured: %v", biasTee)
 			}
 
-			dev.ResetBuffer()
-			logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, bias_tee=%v, offset_tuning=true", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain, biasTee)
+			_ = dev.ResetBuffer()
+			logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, bias_tee=%v", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain, biasTee)
 		}
 	}
 
@@ -295,29 +295,94 @@ func (s *SDR) runSimulationLoop() {
 				}
 			}
 
-			// Synthesize simulated APT IQ signal with noise and subcarrier
+			// Synthesize realistic simulated APT IQ signal with Earth/cloud imagery, telemetry wedges, and Sync A/B
 			for i := 0; i < bufSize/2; i++ {
-				// 0.5 sec line pulse simulation (APT sync frame emulation)
-				linePhase := math.Mod(t*2.0, 1.0) // 2 lines per second
-				syncPulse := 0.2
-				if linePhase < 0.05 {
-					syncPulse = 0.9 // Sync A high pulse
-				} else if linePhase > 0.5 && linePhase < 0.55 {
-					syncPulse = 0.9 // Sync B high pulse
+				// 0.5 sec line period (2 lines per second, 2080 words per line)
+				lineNum := int(t * 2.0)
+				linePhase := math.Mod(t*2.0, 1.0)
+				wordIdx := int(linePhase * 2080.0)
+				var videoVal float64
+
+				if wordIdx < 39 {
+					// Sync A: 7 cycles of 1040 Hz square wave (wordRate=4160Hz -> 4 words per cycle, 28 words active)
+					if wordIdx >= 4 && wordIdx < 32 && ((wordIdx-4)%4 < 2) {
+						videoVal = 0.95
+					} else {
+						videoVal = 0.05
+					}
+				} else if wordIdx < 86 {
+					// Space A + minute marker every 120 lines
+					if lineNum%120 < 4 {
+						videoVal = 0.90
+					} else {
+						videoVal = 0.08
+					}
+				} else if wordIdx < 995 {
+					// Channel A (Visible): Simulated cloud vortices, frontal band, and landmass
+					nx := float64(wordIdx-86) / 909.0
+					ny := float64(lineNum) / 120.0
+					// Cyclone vortex + cloud bands
+					dx := nx - 0.52
+					dy := math.Mod(ny, 1.5) - 0.75
+					dist := math.Sqrt(dx*dx + dy*dy)
+					angle := math.Atan2(dy, dx)
+					spiral := math.Sin(angle*2.0 - dist*18.0 + ny*2.0)
+					swirl := math.Exp(-dist*3.8) * (0.55 + 0.45*spiral)
+					front := math.Exp(-math.Pow((nx-0.25-0.35*math.Sin(ny*1.8))*5.0, 2)) * (0.6 + 0.3*math.Cos(nx*25.0+ny*8.0))
+					land := 0.15 + 0.12*math.Sin(nx*7.0)*math.Cos(ny*4.5)
+					videoVal = math.Max(0.08, math.Min(0.95, land+swirl*0.65+front*0.45))
+				} else if wordIdx < 1040 {
+					// Telemetry A: 16-step grayscale calibration wedge (8 lines per wedge step)
+					step := (lineNum / 8) % 16
+					videoVal = 0.08 + 0.85*(float64(step)/15.0)
+				} else if wordIdx < 1079 {
+					// Sync B: 7 pulses at 832 Hz (5 words per cycle, 35 words active)
+					wb := wordIdx - 1040
+					if wb >= 2 && wb < 37 && ((wb-2)%5 < 3) {
+						videoVal = 0.95
+					} else {
+						videoVal = 0.05
+					}
+				} else if wordIdx < 1126 {
+					// Space B
+					if lineNum%120 < 4 {
+						videoVal = 0.08
+					} else {
+						videoVal = 0.88
+					}
+				} else if wordIdx < 2035 {
+					// Channel B (Thermal Infrared): Cloud top temperatures + sea/land thermal gradient
+					nx := float64(wordIdx-1126) / 909.0
+					ny := float64(lineNum) / 120.0
+					dx := nx - 0.52
+					dy := math.Mod(ny, 1.5) - 0.75
+					dist := math.Sqrt(dx*dx + dy*dy)
+					angle := math.Atan2(dy, dx)
+					spiral := math.Sin(angle*2.0 - dist*18.0 + ny*2.0)
+					swirl := math.Exp(-dist*3.2) * (0.65 + 0.35*spiral)
+					front := math.Exp(-math.Pow((nx-0.25-0.35*math.Sin(ny*1.8))*4.2, 2)) * 0.75
+					thermalGrad := 0.22 + 0.15*math.Cos(ny*1.2) - 0.08*math.Sin(nx*5.0)
+					videoVal = math.Max(0.10, math.Min(0.96, thermalGrad+swirl*0.70+front*0.50))
+				} else {
+					// Telemetry B: 16-step grayscale wedge
+					step := (lineNum / 8) % 16
+					videoVal = 0.08 + 0.85*(float64(step)/15.0)
 				}
 
-				// AM subcarrier 2400Hz audio signal m(t)
-				sub := (0.2 + 0.8*syncPulse*math.Sin(2*math.Pi*subcarrierFreq*t))
+				// AM modulation on 2400Hz subcarrier
+				sub := videoVal * math.Sin(2*math.Pi*subcarrierFreq*t)
 
 				// WFM modulation: instantaneous frequency deviation is proportional to subcarrier audio
 				maxDev := 17000.0 // +/- 17 kHz WFM deviation for NOAA APT
 				phase += 2.0 * math.Pi * (maxDev * sub) / float64(s.sampleRate)
 				if phase > 2.0*math.Pi {
 					phase -= 2.0 * math.Pi
+				} else if phase < -2.0*math.Pi {
+					phase += 2.0 * math.Pi
 				}
 
-				noiseI := (rand.Float64() - 0.5) * 0.08 * gainScale
-				noiseQ := (rand.Float64() - 0.5) * 0.08 * gainScale
+				noiseI := (rand.Float64() - 0.5) * 0.04 * gainScale
+				noiseQ := (rand.Float64() - 0.5) * 0.04 * gainScale
 
 				valI := (math.Cos(phase) * gainScale) + noiseI
 				valQ := (math.Sin(phase) * gainScale) + noiseQ

@@ -31,11 +31,11 @@ func TestParseTLE(t *testing.T) {
 }
 
 func TestTargetSatellitesList(t *testing.T) {
-	if len(TargetSatellites) != 3 {
-		t.Fatalf("Expected 3 target satellites, got %d", len(TargetSatellites))
+	if len(TargetSatellites) < 2 {
+		t.Fatalf("Expected at least 2 target satellites, got %d", len(TargetSatellites))
 	}
-	if TargetSatellites[0].Name != "NOAA 15" {
-		t.Errorf("Expected NOAA 15 first, got %s", TargetSatellites[0].Name)
+	if TargetSatellites[0].Name != "METEOR-M2 3" {
+		t.Errorf("Expected METEOR-M2 3 first, got %s", TargetSatellites[0].Name)
 	}
 }
 

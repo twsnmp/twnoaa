@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -338,12 +339,14 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		}
 		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%s, save_raw_iq=%v", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, gainDisplay, cfg.SaveRawIQ)
 
-		// Raw IQ file stream writer if enabled
+		// Raw IQ file stream writer (always enabled for METEOR-M LRPT digital satellites or when SaveRawIQ is checked)
+		isLRPTSat := strings.HasPrefix(strings.ToUpper(satName), "METEOR") && !a.sdrService.IsSimulation()
+		saveRaw := cfg.SaveRawIQ || isLRPTSat
 		baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
 		rawIQDir := cfg.DataDir + "/raw_iq"
 		rawIQPath := ""
 		var rawIQFile *os.File
-		if cfg.SaveRawIQ {
+		if saveRaw {
 			_ = os.MkdirAll(rawIQDir, 0755)
 			rawIQPath = fmt.Sprintf("%s/%s_raw.iq", rawIQDir, baseName)
 			f, err := os.Create(rawIQPath)
@@ -431,7 +434,13 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		}
 		logger.Infof("RECORDING", "Recording finished for %s: duration=%.1fs, pcm_samples=%d, avg_rssi=%.1f dBFS, peak_rssi=%.1f dBFS, min_rssi=%.1f dBFS, signal_samples=%d, raw_iq=%s", satName, time.Since(startTime).Seconds(), len(pcmSamples), avgRssi, peakRssi, minRssi, len(signalHistory), rawIQPath)
 
-		res, err := decoder.DecodeAPT(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
+		var res *decoder.DecodeResult
+		var err error
+		if isLRPTSat && rawIQPath != "" {
+			res, err = decoder.DecodeLRPT(rawIQPath, cfg.SampleRate, cfg.DataDir+"/images", baseName)
+		} else {
+			res, err = decoder.DecodeAPT(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
+		}
 		if err != nil {
 			logger.Errorf("RECORDING", "Decode failed for %s: %v", satName, err)
 			if a.ctx != nil {
@@ -858,9 +867,14 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			return
 		}
 
-		res, err := decoder.DecodeAPT(pcmSamples, 20800, outDir, baseName)
+		var res *decoder.DecodeResult
+		if strings.Contains(strings.ToUpper(base), "METEOR") {
+			res, err = decoder.DecodeLRPT(iqPath, cfg.SampleRate, outDir, baseName)
+		} else {
+			res, err = decoder.DecodeAPT(pcmSamples, 20800, outDir, baseName)
+		}
 		if err != nil {
-			logger.Errorf("APP", "APT decode from IQ failed: %v", err)
+			logger.Errorf("APP", "Decode from IQ failed: %v", err)
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "decode_error", err.Error())
 			}

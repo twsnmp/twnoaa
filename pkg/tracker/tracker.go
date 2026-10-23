@@ -14,20 +14,28 @@ import (
 )
 
 type SatelliteInfo struct {
-	Name      string  `json:"name"`
-	NORADID   string  `json:"norad_id"`
-	Frequency int     `json:"frequency"` // Hz
-	FreqMHz   float64 `json:"freq_mhz"`
+	Name        string  `json:"name"`
+	NORADID     string  `json:"norad_id"`
+	Frequency   int     `json:"frequency"` // Hz
+	FreqMHz     float64 `json:"freq_mhz"`
+	Mode        string  `json:"mode"`         // "LRPT" or "APT"
+	Operational bool    `json:"operational"`  // true if satellite transmitter is active
 }
 
 var TargetSatellites = []SatelliteInfo{
-	{Name: "NOAA 15", NORADID: "25338", Frequency: 137620000, FreqMHz: 137.620},
-	{Name: "NOAA 18", NORADID: "28654", Frequency: 137912500, FreqMHz: 137.9125},
-	{Name: "NOAA 19", NORADID: "33591", Frequency: 137100000, FreqMHz: 137.100},
+	{Name: "METEOR-M2 3", NORADID: "57166", Frequency: 137900000, FreqMHz: 137.900, Mode: "LRPT", Operational: true},
+	{Name: "METEOR-M2 4", NORADID: "59051", Frequency: 137900000, FreqMHz: 137.900, Mode: "LRPT", Operational: true},
+	{Name: "NOAA 15", NORADID: "25338", Frequency: 137620000, FreqMHz: 137.620, Mode: "APT", Operational: false},
+	{Name: "NOAA 18", NORADID: "28654", Frequency: 137912500, FreqMHz: 137.9125, Mode: "APT", Operational: false},
+	{Name: "NOAA 19", NORADID: "33591", Frequency: 137100000, FreqMHz: 137.100, Mode: "APT", Operational: false},
 }
 
 // Built-in fallback TLEs
 var FallbackTLEs = map[string]string{
+	"57166_1": "1 57166U 23091A   26294.28915516 -.00000009  00000+0  14724-4 0  9991",
+	"57166_2": "2 57166  98.5937 346.5899 0004466 150.2252 209.9182 14.24054645172465",
+	"59051_1": "1 59051U 24039A   26294.30610602  .00000021  00000+0  29259-4 0  9992",
+	"59051_2": "2 59051  98.7193 252.1149 0007319 156.7347 203.4163 14.22440844137199",
 	"25338_1": "1 25338U 98030A   26227.87321262  .00000085  00000+0  65761-4 0  9993",
 	"25338_2": "2 25338  98.7183 286.3210 0011540  89.4120 270.8120 14.25983120421832",
 	"28654_1": "1 28654U 05018A   26227.85412093  .00000092  00000+0  78210-4 0  9997",
@@ -37,28 +45,32 @@ var FallbackTLEs = map[string]string{
 }
 
 type SatelliteState struct {
-	Name      string    `json:"name"`
-	NORADID   string    `json:"norad_id"`
-	Frequency int       `json:"frequency"`
-	Elevation float64   `json:"elevation"`
-	Azimuth   float64   `json:"azimuth"`
-	Latitude  float64   `json:"latitude"`
-	Longitude float64   `json:"longitude"`
-	Altitude  float64   `json:"altitude"`
-	DopplerHz float64   `json:"doppler_hz"`
-	IsActive  bool      `json:"is_active"`
-	Updated   time.Time `json:"updated"`
+	Name        string    `json:"name"`
+	NORADID     string    `json:"norad_id"`
+	Frequency   int       `json:"frequency"`
+	Mode        string    `json:"mode"`
+	Operational bool      `json:"operational"`
+	Elevation   float64   `json:"elevation"`
+	Azimuth     float64   `json:"azimuth"`
+	Latitude    float64   `json:"latitude"`
+	Longitude   float64   `json:"longitude"`
+	Altitude    float64   `json:"altitude"`
+	DopplerHz   float64   `json:"doppler_hz"`
+	IsActive    bool      `json:"is_active"`
+	Updated     time.Time `json:"updated"`
 }
 
 type PassDetail struct {
-	SatName   string    `json:"sat_name"`
-	NORADID   string    `json:"norad_id"`
-	Frequency int       `json:"frequency"`
-	AOS       time.Time `json:"aos"`
-	LOS       time.Time `json:"los"`
-	MaxElev   float64   `json:"max_elev"`
-	MaxElevAz float64   `json:"max_elev_az"`
-	Duration  float64   `json:"duration_sec"`
+	SatName     string    `json:"sat_name"`
+	NORADID     string    `json:"norad_id"`
+	Frequency   int       `json:"frequency"`
+	Mode        string    `json:"mode"`
+	Operational bool      `json:"operational"`
+	AOS         time.Time `json:"aos"`
+	LOS         time.Time `json:"los"`
+	MaxElev     float64   `json:"max_elev"`
+	MaxElevAz   float64   `json:"max_elev_az"`
+	Duration    float64   `json:"duration_sec"`
 }
 
 type IPLocation struct {
@@ -184,17 +196,19 @@ func (t *Tracker) GetCurrentStates(obsLat, obsLon, obsAlt float64) ([]*Satellite
 		lat, lon, alt := ecefToGeodetic(ecef)
 
 		states = append(states, &SatelliteState{
-			Name:      satInfo.Name,
-			NORADID:   satInfo.NORADID,
-			Frequency: satInfo.Frequency,
-			Elevation: math.Round(look.Elevation*10) / 10,
-			Azimuth:   math.Round(look.Azimuth*10) / 10,
-			Latitude:  math.Round(lat*100) / 100,
-			Longitude: math.Round(lon*100) / 100,
-			Altitude:  math.Round(alt*10) / 10,
-			DopplerHz: math.Round(doppler),
-			IsActive:  look.Elevation >= 5.0,
-			Updated:   time.Now(),
+			Name:        satInfo.Name,
+			NORADID:     satInfo.NORADID,
+			Frequency:   satInfo.Frequency,
+			Mode:        satInfo.Mode,
+			Operational: satInfo.Operational,
+			Elevation:   math.Round(look.Elevation*10) / 10,
+			Azimuth:     math.Round(look.Azimuth*10) / 10,
+			Latitude:    math.Round(lat*100) / 100,
+			Longitude:   math.Round(lon*100) / 100,
+			Altitude:    math.Round(alt*10) / 10,
+			DopplerHz:   math.Round(doppler),
+			IsActive:    look.Elevation >= 5.0 && satInfo.Operational,
+			Updated:     time.Now(),
 		})
 	}
 
@@ -304,32 +318,36 @@ func (t *Tracker) GetPassesInWindow(obsLat, obsLon, obsAlt float64, startTime, e
 			} else {
 				if inPass {
 					inPass = false
-					if maxEl >= 5.0 {
+					if maxEl >= 5.0 && satInfo.Operational {
 						passes = append(passes, &PassDetail{
-							SatName:   satInfo.Name,
-							NORADID:   satInfo.NORADID,
-							Frequency: satInfo.Frequency,
-							AOS:       passStart.Local(),
-							LOS:       tm.Local(),
-							MaxElev:   math.Round(maxEl*10) / 10,
-							MaxElevAz: math.Round(maxElAz*10) / 10,
-							Duration:  tm.Sub(passStart).Seconds(),
+							SatName:     satInfo.Name,
+							NORADID:     satInfo.NORADID,
+							Frequency:   satInfo.Frequency,
+							Mode:        satInfo.Mode,
+							Operational: satInfo.Operational,
+							AOS:         passStart.Local(),
+							LOS:         tm.Local(),
+							MaxElev:     math.Round(maxEl*10) / 10,
+							MaxElevAz:   math.Round(maxElAz*10) / 10,
+							Duration:    tm.Sub(passStart).Seconds(),
 						})
 					}
 				}
 			}
 		}
 
-		if inPass && maxEl >= 5.0 {
+		if inPass && maxEl >= 5.0 && satInfo.Operational {
 			passes = append(passes, &PassDetail{
-				SatName:   satInfo.Name,
-				NORADID:   satInfo.NORADID,
-				Frequency: satInfo.Frequency,
-				AOS:       passStart.Local(),
-				LOS:       endTime.Local(),
-				MaxElev:   math.Round(maxEl*10) / 10,
-				MaxElevAz: math.Round(maxElAz*10) / 10,
-				Duration:  endTime.Sub(passStart).Seconds(),
+				SatName:     satInfo.Name,
+				NORADID:     satInfo.NORADID,
+				Frequency:   satInfo.Frequency,
+				Mode:        satInfo.Mode,
+				Operational: satInfo.Operational,
+				AOS:         passStart.Local(),
+				LOS:         endTime.Local(),
+				MaxElev:     math.Round(maxEl*10) / 10,
+				MaxElevAz:   math.Round(maxElAz*10) / 10,
+				Duration:    endTime.Sub(passStart).Seconds(),
 			})
 		}
 	}
@@ -461,9 +479,8 @@ func parseTLE(l1, l2 string) (*TLESatellite, error) {
 type Vector struct{ X, Y, Z float64 }
 
 func (s *TLESatellite) propagateECEF(t time.Time) Vector {
-	// Reversed sign to advance time by +137 minutes (pull calculation forward to match N2YO)
-	tCorr := t.Add(137 * time.Minute)
-	dtMinutes := tCorr.Sub(s.EpochTime).Minutes()
+	tUTC := t.UTC()
+	dtMinutes := tUTC.Sub(s.EpochTime).Minutes()
 
 	j2 := 0.00108263
 	ae := 6378.137
@@ -509,7 +526,7 @@ func (s *TLESatellite) propagateECEF(t time.Time) Vector {
 	yECI := r * (sinNode*cosU + cosNode*sinU*cosInc)
 	zECI := r * (sinU * sinInc)
 
-	gmstRad := gmstTime(tCorr)
+	gmstRad := gmstTime(tUTC)
 
 	sinGmst, cosGmst := math.Sincos(gmstRad)
 	xECEF := xECI*cosGmst + yECI*sinGmst

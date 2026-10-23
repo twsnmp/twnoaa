@@ -24,6 +24,8 @@
 
   // Satellite distinct colors
   const satColors = {
+    'METEOR-M2 3': '#06b6d4', // Cyan
+    'METEOR-M2 4': '#ec4899', // Pink
     'NOAA 15': '#3b82f6', // Blue
     'NOAA 18': '#10b981', // Emerald
     'NOAA 19': '#f59e0b', // Amber

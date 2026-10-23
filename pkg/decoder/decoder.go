@@ -185,17 +185,29 @@ func extractEnvelope(samples []float64, sampleRate int) []float64 {
 		sr = 20800.0
 	}
 
-	// 2nd-order cascaded IIR low-pass filter (~1600 Hz cutoff for AM envelope detection)
+	// 1. Pre-bandpass filter around 2400 Hz subcarrier (high-pass ~600 Hz + low-pass ~4400 Hz)
+	hpAlpha := math.Exp(-2.0 * math.Pi * 600.0 / sr)
+	lpAlpha := math.Exp(-2.0 * math.Pi * 4400.0 / sr)
+	lpOneMinus := 1.0 - lpAlpha
+
+	// 2. 2nd-order cascaded IIR low-pass filter (~1600 Hz cutoff for AM envelope detection)
 	cutoff := 1600.0
 	alpha := math.Exp(-2.0 * math.Pi * cutoff / sr)
 	oneMinusAlpha := 1.0 - alpha
 
 	env := make([]float64, len(samples))
+	hpState := 0.0
+	bpState := 0.0
 	stage1 := 0.0
 	stage2 := 0.0
 
 	for i := 0; i < len(samples); i++ {
-		absS := math.Abs(samples[i])
+		s := samples[i]
+		hpState = hpState*hpAlpha + s*(1.0-hpAlpha)
+		hpOut := s - hpState
+		bpState = bpState*lpAlpha + hpOut*lpOneMinus
+
+		absS := math.Abs(bpState)
 		stage1 = stage1*alpha + absS*oneMinusAlpha
 		stage2 = stage2*alpha + stage1*oneMinusAlpha
 		env[i] = stage2

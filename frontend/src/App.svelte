@@ -8,8 +8,8 @@
   import Settings from './components/Settings.svelte'
 
   let activeTab = $state('tracker')
-  let selectedFreq = $state(137100000)
-  let selectedSat = $state('NOAA 19')
+  let selectedFreq = $state(137900000)
+  let selectedSat = $state('METEOR-M2 4')
   let selectedRecordForAI = $state(null)
 
   function handleSelectPass(satName, freq) {
