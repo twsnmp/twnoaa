@@ -1,6 +1,6 @@
 module twnoaa
 
-go 1.26.4
+go 1.27
 
 require (
 	github.com/jpoirier/gortlsdr v2.10.0+incompatible
