@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Settings, MapPin, Sliders, Key, Save, RefreshCw, CheckCircle2 } from '@lucide/svelte'
+  import { Settings, MapPin, Sliders, Key, Save, RefreshCw, CheckCircle2, Radio, Trash2, X } from '@lucide/svelte'
 
   let cfg = $state({
     observer_lat: 36.028,
@@ -26,6 +26,10 @@
 
   let saveMsg = $state('')
   let isFetchingLoc = $state(false)
+  let rawStorageInfo = $state(null)
+  let isLoadingStorage = $state(false)
+  let showDeleteAllModal = $state(false)
+  let isDeletingAllRaw = $state(false)
 
   async function loadConfig() {
     if (window.go?.main?.App) {
@@ -35,6 +39,34 @@
       } catch (err) {
         console.error("Failed to load config:", err)
       }
+    }
+  }
+
+  async function loadRawStorageInfo() {
+    if (!window.go?.main?.App?.GetRawDataStorageInfo) return
+    isLoadingStorage = true
+    try {
+      rawStorageInfo = await window.go.main.App.GetRawDataStorageInfo()
+    } catch (err) {
+      console.error("Failed to get raw storage info:", err)
+    } finally {
+      isLoadingStorage = false
+    }
+  }
+
+  async function confirmDeleteAllRaw() {
+    if (!window.go?.main?.App?.DeleteAllRawData) return
+    isDeletingAllRaw = true
+    showDeleteAllModal = false
+    try {
+      const msg = await window.go.main.App.DeleteAllRawData()
+      saveMsg = msg || i18n.t('settings.allRawDataDeleted')
+      await loadRawStorageInfo()
+      setTimeout(() => saveMsg = '', 3000)
+    } catch (err) {
+      saveMsg = 'Error: ' + err
+    } finally {
+      isDeletingAllRaw = false
     }
   }
 
@@ -68,6 +100,7 @@
 
   onMount(() => {
     loadConfig()
+    loadRawStorageInfo()
   })
 </script>
 
@@ -249,6 +282,60 @@
         </div>
       </label>
 
+      <!-- Raw IQ Storage Management Box -->
+      <div class="p-3.5 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Radio class="w-4 h-4 text-indigo-400" />
+            <div>
+              <span class="text-xs font-bold text-slate-200 block">{i18n.t('settings.rawStorage')}</span>
+              <span class="text-[10px] text-slate-500 block">{i18n.t('settings.rawStorageDesc')}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onclick={loadRawStorageInfo}
+            disabled={isLoadingStorage}
+            class="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            title={i18n.t('settings.refreshStorage')}
+          >
+            <RefreshCw class="w-3.5 h-3.5 {isLoadingStorage ? 'animate-spin text-cyan-400' : ''}" />
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800/80">
+          <div>
+            <span class="text-[10px] text-slate-500 uppercase tracking-wider block">{i18n.t('settings.rawStorageTotal')}</span>
+            <div class="flex items-baseline gap-2 mt-0.5">
+              <span class="text-sm font-bold font-mono text-indigo-300">
+                {rawStorageInfo ? rawStorageInfo.total_size_formatted : '0 B'}
+              </span>
+              {#if rawStorageInfo && rawStorageInfo.file_count > 0}
+                <span class="text-[10px] font-mono text-slate-400">
+                  ({i18n.t('settings.rawFilesCount', { count: rawStorageInfo.file_count })})
+                </span>
+              {/if}
+            </div>
+          </div>
+
+          {#if rawStorageInfo && rawStorageInfo.file_count > 0}
+            <button
+              type="button"
+              onclick={() => showDeleteAllModal = true}
+              disabled={isDeletingAllRaw}
+              class="px-2.5 py-1.5 bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+              <span>{i18n.t('settings.deleteAllRawData')}</span>
+            </button>
+          {:else}
+            <span class="text-[11px] text-slate-500 italic">
+              {i18n.t('settings.noRawData')}
+            </span>
+          {/if}
+        </div>
+      </div>
+
       <div>
         <div class="flex items-center justify-between mb-1">
           <label for="default-gain-input" class="text-xs font-semibold text-slate-400 uppercase tracking-wider">{i18n.t('settings.defaultGain')}</label>
@@ -364,3 +451,51 @@
     </div>
   </div>
 </div>
+
+<!-- Purge All Raw IQ Confirmation Modal -->
+{#if showDeleteAllModal && rawStorageInfo}
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-rose-400">
+          <div class="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+            <Trash2 class="w-5 h-5 text-rose-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('settings.deleteAllRawData')}</h3>
+            <p class="text-xs text-slate-400 font-mono mt-0.5">{rawStorageInfo.total_size_formatted} ({rawStorageInfo.file_count} files)</p>
+          </div>
+        </div>
+        <button
+          onclick={() => showDeleteAllModal = false}
+          class="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed whitespace-pre-line">
+        {i18n.t('settings.deleteAllRawDataConfirm', { size: rawStorageInfo.total_size_formatted })}
+      </p>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onclick={() => showDeleteAllModal = false}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+        <button
+          type="button"
+          onclick={confirmDeleteAllRaw}
+          disabled={isDeletingAllRaw}
+          class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-rose-600/30 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+        >
+          <Trash2 class="w-4 h-4" />
+          {i18n.t('settings.deleteAllRawData')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

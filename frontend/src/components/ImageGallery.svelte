@@ -16,6 +16,8 @@
   let currentImageBase64 = $state('')
   let recordToDelete = $state(null)
   let showBatchDeleteModal = $state(false)
+  let recordRawIQToDelete = $state(null)
+  let showBatchRawIQDeleteModal = $state(false)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
   let detailViewTab = $state('image') // 'image' | 'signal' | 'compare' | 'audio' | 'spectrum'
@@ -28,6 +30,10 @@
 
   let selectedRecordsList = $derived(
     records.filter(r => selectedRecordIds.includes(r.id))
+  )
+
+  let selectedRecordsWithRawIQ = $derived(
+    records.filter(r => selectedRecordIds.includes(r.id) && Boolean(r.raw_iq_path))
   )
 
   let uniqueSatsWithData = $derived(
@@ -391,6 +397,41 @@
     recordToDelete = null
   }
 
+  function promptDeleteRawIQ(rec, e) {
+    if (e) {
+      e.stopPropagation()
+      e.preventDefault()
+    }
+    recordRawIQToDelete = rec
+  }
+
+  function cancelDeleteRawIQ() {
+    recordRawIQToDelete = null
+  }
+
+  async function confirmDeleteRawIQ() {
+    if (!recordRawIQToDelete) return
+    const recId = recordRawIQToDelete.id
+    recordRawIQToDelete = null
+
+    // Optimistically update frontend state
+    records = records.map(r => r.id === recId ? { ...r, raw_iq_path: '' } : r)
+    if (selectedRecord?.id === recId) {
+      selectedRecord = { ...selectedRecord, raw_iq_path: '' }
+    }
+
+    if (window.go?.main?.App?.DeletePassRawIQ) {
+      try {
+        await window.go.main.App.DeletePassRawIQ(recId)
+        await loadRecords()
+        wavStatusMsg = i18n.t('gallery.rawIQDeleted')
+        setTimeout(() => wavStatusMsg = '', 3000)
+      } catch (err) {
+        console.error("Failed to delete raw IQ data:", err)
+      }
+    }
+  }
+
   function promptBatchDelete() {
     if (selectedRecordIds.length === 0) return
     showBatchDeleteModal = true
@@ -428,6 +469,39 @@
         await loadRecords()
       } catch (err) {
         console.error("Failed to batch delete records:", err)
+      }
+    }
+  }
+
+  function promptBatchDeleteRawIQ() {
+    if (selectedRecordsWithRawIQ.length === 0) return
+    showBatchRawIQDeleteModal = true
+  }
+
+  function cancelBatchDeleteRawIQ() {
+    showBatchRawIQDeleteModal = false
+  }
+
+  async function confirmBatchDeleteRawIQ() {
+    const idsWithRaw = selectedRecordsWithRawIQ.map(r => r.id)
+    showBatchRawIQDeleteModal = false
+    if (idsWithRaw.length === 0) return
+
+    // Optimistically update frontend state
+    const idSet = new Set(idsWithRaw)
+    records = records.map(r => idSet.has(r.id) ? { ...r, raw_iq_path: '' } : r)
+    if (selectedRecord && idSet.has(selectedRecord.id)) {
+      selectedRecord = { ...selectedRecord, raw_iq_path: '' }
+    }
+
+    if (window.go?.main?.App?.DeletePassesRawIQ) {
+      try {
+        await window.go.main.App.DeletePassesRawIQ(idsWithRaw)
+        await loadRecords()
+        wavStatusMsg = i18n.t('gallery.rawIQDeleted')
+        setTimeout(() => wavStatusMsg = '', 3000)
+      } catch (err) {
+        console.error("Failed to batch delete raw IQ data:", err)
       }
     }
   }
@@ -616,13 +690,17 @@
             </div>
 
             <div class="flex items-center gap-2">
-              <button
-                type="button"
-                onclick={clearSelection}
-                class="px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-              >
-                {i18n.t('gallery.clearSelection')}
-              </button>
+              {#if selectedRecordsWithRawIQ.length > 0}
+                <button
+                  type="button"
+                  onclick={promptBatchDeleteRawIQ}
+                  class="px-2.5 py-1 bg-indigo-900/70 hover:bg-indigo-800 text-indigo-200 border border-indigo-700/60 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                  title={i18n.t('gallery.batchDeleteRawIQ')}
+                >
+                  <Radio class="w-3 h-3 text-indigo-400" />
+                  <span>{i18n.t('gallery.batchDeleteRawIQBtn', { count: selectedRecordsWithRawIQ.length })}</span>
+                </button>
+              {/if}
               <button
                 type="button"
                 onclick={promptBatchDelete}
@@ -631,6 +709,13 @@
               >
                 <Trash2 class="w-3 h-3" />
                 <span>{i18n.t('gallery.batchDeleteBtn', { count: selectedRecordIds.length })}</span>
+              </button>
+              <button
+                type="button"
+                onclick={clearSelection}
+                class="px-1.5 py-0.5 text-[10px] text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+              >
+                {i18n.t('gallery.clearSelection')}
               </button>
             </div>
           </div>
@@ -673,6 +758,12 @@
               </div>
 
               <div class="flex items-center gap-1.5 shrink-0">
+                {#if rec.raw_iq_path}
+                  <span class="px-1.5 py-0.5 bg-indigo-500/15 text-indigo-300 rounded text-[9px] font-mono font-bold border border-indigo-500/30" title="Raw IQ Stream Available">
+                    IQ
+                  </span>
+                {/if}
+
                 {#if rec.audio_path}
                   <span class="p-1 bg-cyan-500/10 text-cyan-400 rounded-md border border-cyan-500/20" title="WAV Audio Available">
                     <Music class="w-3 h-3" />
@@ -809,6 +900,18 @@
                     <option value="fit">{i18n.t('gallery.fitAspect')}</option>
                   </select>
                 </div>
+              {/if}
+
+              {#if selectedRecord.raw_iq_path}
+                <button
+                  type="button"
+                  onclick={(e) => promptDeleteRawIQ(selectedRecord, e)}
+                  class="px-2.5 py-1.5 bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 rounded-xl border border-indigo-500/40 text-xs font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                  title={i18n.t('gallery.deleteRawIQ')}
+                >
+                  <Radio class="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{i18n.t('gallery.deleteRawIQ')}</span>
+                </button>
               {/if}
 
               <button
@@ -1050,6 +1153,100 @@
         >
           <Trash2 class="w-4 h-4" />
           {i18n.t('gallery.batchDelete')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Single Raw IQ Delete Confirmation Modal -->
+{#if recordRawIQToDelete}
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-indigo-400">
+          <div class="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+            <Radio class="w-5 h-5 text-indigo-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('gallery.deleteRawIQ')}</h3>
+            <p class="text-xs text-slate-400 font-mono mt-0.5">{recordRawIQToDelete.sat_name} ({new Date(recordRawIQToDelete.timestamp).toLocaleString()})</p>
+          </div>
+        </div>
+        <button
+          onclick={cancelDeleteRawIQ}
+          class="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed whitespace-pre-line">
+        {i18n.t('gallery.deleteRawIQConfirm')}
+      </p>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onclick={cancelDeleteRawIQ}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+        <button
+          type="button"
+          onclick={confirmDeleteRawIQ}
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+        >
+          <Radio class="w-4 h-4" />
+          {i18n.t('gallery.deleteRawIQ')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Batch Raw IQ Delete Confirmation Modal -->
+{#if showBatchRawIQDeleteModal && selectedRecordsWithRawIQ.length > 0}
+  <div class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3 text-indigo-400">
+          <div class="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+            <Radio class="w-5 h-5 text-indigo-400" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">{i18n.t('gallery.batchDeleteRawIQ')}</h3>
+            <p class="text-xs text-slate-400 mt-0.5">{i18n.t('gallery.selectedCount', { count: selectedRecordsWithRawIQ.length })}</p>
+          </div>
+        </div>
+        <button
+          onclick={cancelBatchDeleteRawIQ}
+          class="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
+        >
+          <X class="w-4 h-4" />
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-300 leading-relaxed whitespace-pre-line">
+        {i18n.t('gallery.batchDeleteRawIQConfirm', { count: selectedRecordsWithRawIQ.length })}
+      </p>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button
+          type="button"
+          onclick={cancelBatchDeleteRawIQ}
+          class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+        >
+          {i18n.t('gallery.cancel')}
+        </button>
+        <button
+          type="button"
+          onclick={confirmBatchDeleteRawIQ}
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+        >
+          <Radio class="w-4 h-4" />
+          {i18n.t('gallery.batchDeleteRawIQBtn', { count: selectedRecordsWithRawIQ.length })}
         </button>
       </div>
     </div>

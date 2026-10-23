@@ -643,6 +643,26 @@ func (a *App) SelectWAVFile() string {
 	return selectedPath
 }
 
+type RawStorageInfo struct {
+	TotalSizeBytes     int64  `json:"total_size_bytes"`
+	TotalSizeFormatted string `json:"total_size_formatted"`
+	FileCount          int    `json:"file_count"`
+	RawIQDir           string `json:"raw_iq_dir"`
+}
+
+func formatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
 func (a *App) DeletePassRecord(recordID string) string {
 	records := a.store.GetRecords()
 	for _, r := range records {
@@ -658,6 +678,9 @@ func (a *App) DeletePassRecord(recordID string) string {
 			}
 			if r.AudioPath != "" {
 				_ = os.Remove(r.AudioPath)
+			}
+			if r.RawIQPath != "" {
+				_ = os.Remove(r.RawIQPath)
 			}
 			break
 		}
@@ -692,12 +715,128 @@ func (a *App) DeletePassRecords(recordIDs []string) string {
 			if r.AudioPath != "" {
 				_ = os.Remove(r.AudioPath)
 			}
+			if r.RawIQPath != "" {
+				_ = os.Remove(r.RawIQPath)
+			}
 		}
 	}
 	if err := a.store.DeleteRecords(recordIDs); err != nil {
 		return fmt.Sprintf("Error deleting records: %v", err)
 	}
 	return "Records deleted successfully"
+}
+
+// DeletePassRawIQ deletes only the raw IQ file associated with a record, keeping image and audio
+func (a *App) DeletePassRawIQ(recordID string) string {
+	records := a.store.GetRecords()
+	for _, r := range records {
+		if r.ID == recordID {
+			if r.RawIQPath != "" {
+				_ = os.Remove(r.RawIQPath)
+				r.RawIQPath = ""
+				if err := a.store.UpdateRecord(r); err != nil {
+					return fmt.Sprintf("Error updating record: %v", err)
+				}
+				logger.Infof("DATASTORE", "Deleted raw IQ data for record ID %s", recordID)
+				return "Raw IQ data deleted successfully"
+			}
+			return "No raw IQ data associated with this record"
+		}
+	}
+	return "Record not found"
+}
+
+// DeletePassesRawIQ deletes raw IQ files for multiple records
+func (a *App) DeletePassesRawIQ(recordIDs []string) string {
+	if len(recordIDs) == 0 {
+		return "No records specified"
+	}
+	idMap := make(map[string]bool, len(recordIDs))
+	for _, id := range recordIDs {
+		idMap[id] = true
+	}
+
+	records := a.store.GetRecords()
+	deletedCount := 0
+	for _, r := range records {
+		if idMap[r.ID] && r.RawIQPath != "" {
+			_ = os.Remove(r.RawIQPath)
+			r.RawIQPath = ""
+			if err := a.store.UpdateRecord(r); err == nil {
+				deletedCount++
+			}
+		}
+	}
+	logger.Infof("DATASTORE", "Batch deleted raw IQ data for %d records", deletedCount)
+	return fmt.Sprintf("Deleted raw IQ data for %d records", deletedCount)
+}
+
+// GetRawDataStorageInfo returns storage usage stats for raw IQ files
+func (a *App) GetRawDataStorageInfo() (*RawStorageInfo, error) {
+	cfg := a.store.GetConfig()
+	rawDir := cfg.DataDir + "/raw_iq"
+
+	info := &RawStorageInfo{
+		RawIQDir:           rawDir,
+		TotalSizeBytes:     0,
+		TotalSizeFormatted: "0 B",
+		FileCount:          0,
+	}
+
+	entries, err := os.ReadDir(rawDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return info, nil
+		}
+		return nil, fmt.Errorf("failed to read raw IQ directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".iq") || strings.HasSuffix(entry.Name(), ".raw")) {
+			fi, err := entry.Info()
+			if err == nil {
+				info.TotalSizeBytes += fi.Size()
+				info.FileCount++
+			}
+		}
+	}
+
+	info.TotalSizeFormatted = formatBytes(info.TotalSizeBytes)
+	return info, nil
+}
+
+// DeleteAllRawData removes all raw IQ files in storage and clears raw_iq_path on all records
+func (a *App) DeleteAllRawData() string {
+	cfg := a.store.GetConfig()
+	rawDir := cfg.DataDir + "/raw_iq"
+
+	deletedFiles := 0
+	entries, err := os.ReadDir(rawDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".iq") || strings.HasSuffix(entry.Name(), ".raw")) {
+				filePath := filepath.Join(rawDir, entry.Name())
+				if err := os.Remove(filePath); err == nil {
+					deletedFiles++
+				}
+			}
+		}
+	}
+
+	records := a.store.GetRecords()
+	updatedRecords := 0
+	for _, r := range records {
+		if r.RawIQPath != "" {
+			_ = os.Remove(r.RawIQPath)
+			r.RawIQPath = ""
+			if err := a.store.UpdateRecord(r); err == nil {
+				updatedRecords++
+			}
+		}
+	}
+
+	logger.Infof("DATASTORE", "Purged all raw IQ data: deleted %d files, cleared %d records", deletedFiles, updatedRecords)
+	return fmt.Sprintf("All raw IQ data deleted (%d files removed)", deletedFiles)
 }
 
 
