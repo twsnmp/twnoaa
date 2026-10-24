@@ -491,6 +491,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			ChannelB:       res.ChanBPath,
 			AudioPath:      wavPath,
 			RawIQPath:      rawIQPath,
+			DecodeMode:     res.DecodeMode,
+			DayFraction:    res.DayFraction,
 			SignalHistory:  signalHistory,
 		}
 
@@ -923,6 +925,8 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			ChannelA:       res.ChanAPath,
 			ChannelB:       res.ChanBPath,
 			AudioPath:      wavPath,
+			DecodeMode:     res.DecodeMode,
+			DayFraction:    res.DayFraction,
 		}
 
 		_ = a.store.AddRecord(record)
@@ -1067,6 +1071,8 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			ChannelB:       res.ChanBPath,
 			AudioPath:      wavPath,
 			RawIQPath:      iqPath,
+			DecodeMode:     res.DecodeMode,
+			DayFraction:    res.DayFraction,
 		}
 
 		_ = a.store.AddRecord(record)

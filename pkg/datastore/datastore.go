@@ -75,6 +75,8 @@ type PassRecord struct {
 	ChannelB       string        `json:"channel_b"`
 	AudioPath      string        `json:"audio_path"`
 	RawIQPath      string        `json:"raw_iq_path,omitempty"`
+	DecodeMode     string        `json:"decode_mode,omitempty"`
+	DayFraction    float64       `json:"day_fraction,omitempty"`
 	AIAnalysis     string        `json:"ai_analysis"`
 	AnalysisDate   time.Time     `json:"analysis_date"`
 	SignalHistory  []SignalPoint `json:"signal_history,omitempty"`

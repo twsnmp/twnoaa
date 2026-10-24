@@ -16,11 +16,13 @@ import (
 const TargetWidth = 2080
 
 type DecodeResult struct {
-	FullImagePath string `json:"full_image_path"`
-	ChanAPath     string `json:"chan_a_path"`
-	ChanBPath     string `json:"chan_b_path"`
-	LineCount     int    `json:"line_count"`
-	SyncOffset    int    `json:"sync_offset"`
+	FullImagePath string  `json:"full_image_path"`
+	ChanAPath     string  `json:"chan_a_path"`
+	ChanBPath     string  `json:"chan_b_path"`
+	LineCount     int     `json:"line_count"`
+	SyncOffset    int     `json:"sync_offset"`
+	DecodeMode    string  `json:"decode_mode,omitempty"`
+	DayFraction   float64 `json:"day_fraction,omitempty"`
 }
 
 // DecodeAPT processes demodulated audio float64 samples (-1.0 to 1.0) and generates APT satellite images
@@ -176,6 +178,8 @@ func DecodeAPT(samples []float64, sampleRate int, outDir, baseName string) (*Dec
 		ChanBPath:     chanBPath,
 		LineCount:     len(alignedLines),
 		SyncOffset:    bestInitPos,
+		DecodeMode:    "apt",
+		DayFraction:   1.0,
 	}, nil
 }
 

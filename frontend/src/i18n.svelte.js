@@ -119,6 +119,10 @@ const translations = {
       batchDeleteRawIQConfirm: "Are you sure you want to delete only the Raw IQ data for the {count} selected passes?\nImages, audio, and signal records will be preserved.",
       batchDeleteRawIQBtn: "Delete Raw IQ ({count})",
       rawIQBadge: "RAW IQ",
+      spectrogramBadge: "RF Spectrum (No Sync)",
+      spectrogramBadgeShort: "SPEC",
+      nightBadge: "Night (IR)",
+      nightBadgeShort: "IR",
       rawIQDeleted: "Raw IQ data deleted successfully",
       cancel: "Cancel",
 
@@ -374,6 +378,10 @@ const translations = {
       batchDeleteRawIQConfirm: "選択した{count}件のパスからRaw IQ生データのみを削除しますか？\n※画像、音声、受信履歴は保持されます。",
       batchDeleteRawIQBtn: "生データのみ削除 ({count})",
       rawIQBadge: "RAW IQ",
+      spectrogramBadge: "LRPT同期なし (RFスペクトラム)",
+      spectrogramBadgeShort: "電波",
+      nightBadge: "夜間 (赤外線)",
+      nightBadgeShort: "夜間",
       rawIQDeleted: "Raw IQ生データを削除しました",
       cancel: "キャンセル",
 

@@ -758,6 +758,16 @@
               </div>
 
               <div class="flex items-center gap-1.5 shrink-0">
+                {#if rec.decode_mode === 'lrpt_spectrogram'}
+                  <span class="px-1.5 py-0.5 bg-amber-500/15 text-amber-300 rounded text-[9px] font-mono font-bold border border-amber-500/30" title={i18n.t('gallery.spectrogramBadge')}>
+                    {i18n.t('gallery.spectrogramBadgeShort')}
+                  </span>
+                {:else if rec.decode_mode === 'lrpt' && rec.day_fraction !== undefined && rec.day_fraction < 0.2}
+                  <span class="px-1.5 py-0.5 bg-purple-500/15 text-purple-300 rounded text-[9px] font-mono font-bold border border-purple-500/30" title={i18n.t('gallery.nightBadge')}>
+                    {i18n.t('gallery.nightBadgeShort')}
+                  </span>
+                {/if}
+
                 {#if rec.raw_iq_path}
                   <span class="px-1.5 py-0.5 bg-indigo-500/15 text-indigo-300 rounded text-[9px] font-mono font-bold border border-indigo-500/30" title="Raw IQ Stream Available">
                     IQ
@@ -810,6 +820,15 @@
               <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2 whitespace-nowrap">
                 {selectedRecord.sat_name}
                 <span class="text-xs font-mono text-cyan-400 font-normal">({(selectedRecord.frequency / 1e6).toFixed(4)} MHz)</span>
+                {#if selectedRecord.decode_mode === 'lrpt_spectrogram'}
+                  <span class="px-2 py-0.5 bg-amber-500/15 text-amber-300 rounded-md text-[10px] font-mono font-bold border border-amber-500/30">
+                    {i18n.t('gallery.spectrogramBadge')}
+                  </span>
+                {:else if selectedRecord.decode_mode === 'lrpt' && selectedRecord.day_fraction !== undefined && selectedRecord.day_fraction < 0.2}
+                  <span class="px-2 py-0.5 bg-purple-500/15 text-purple-300 rounded-md text-[10px] font-mono font-bold border border-purple-500/30">
+                    {i18n.t('gallery.nightBadge')}
+                  </span>
+                {/if}
               </h3>
               <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1">
                 <span>{new Date(selectedRecord.timestamp).toLocaleString()}</span>

@@ -108,6 +108,8 @@ func DecodeSSTV(samples []float64, sampleRate int, outDir, baseName string) (*De
 		ChanBPath:     chanBPath,
 		LineCount:     rgbImg.Bounds().Dy(),
 		SyncOffset:    syncStartSample,
+		DecodeMode:    "sstv",
+		DayFraction:   1.0,
 	}, nil
 }
 

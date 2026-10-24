@@ -405,9 +405,10 @@ func viterbiDecodeNRZM(softBits []float64, invertG2 bool) []uint8 {
 	return nrzm
 }
 
-func rsCorrectCADU(cadu []byte) (int, int) {
+func rsCorrectCADU(cadu []byte) (int, int, uint8) {
 	totalFixed := 0
 	validSubwords := 0
+	var validMask uint8
 	for inter := 0; inter < 4; inter++ {
 		var c [255]uint8
 		for k := 0; k < 255; k++ {
@@ -432,6 +433,7 @@ func rsCorrectCADU(cadu []byte) (int, int) {
 		}
 		if allZero {
 			validSubwords++
+			validMask |= 1 << uint(inter)
 			continue
 		}
 
@@ -550,15 +552,17 @@ func rsCorrectCADU(cadu []byte) (int, int) {
 		}
 		totalFixed += L
 		validSubwords++
+		validMask |= 1 << uint(inter)
 	}
-	return totalFixed, validSubwords
+	return totalFixed, validSubwords, validMask
 }
 
 type caduFrame struct {
-	counter uint32
-	errCost int
-	margin  int
-	data    []byte
+	counter   uint32
+	errCost   int
+	margin    int
+	validMask uint8
+	data      []byte
 }
 
 // DecodeLRPT decodes a METEOR-M2 3/4 LRPT (72kbaud OQPSK) Raw IQ file using a 100% pure Go pipeline:
@@ -653,6 +657,7 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 
 	var mu sync.Mutex
 	caduMap := make(map[uint32]caduFrame)
+	partialMap := make(map[uint32]caduFrame)
 
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 1 {
@@ -717,7 +722,7 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 				}
 				if inCnt > 0 && outCnt > 0 {
 					snrLinear := (inPow / float64(inCnt)) / (outPow/float64(outCnt) + 1e-12)
-					if snrLinear < 1.25 { // < ~1.0 dB in-band excess
+					if snrLinear < 1.15 { // < ~0.6 dB in-band excess
 						continue
 					}
 				}
@@ -800,7 +805,7 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 					}
 				}
 				avgP4 := sumP4 / float64(2*searchBins+1)
-				if maxP4/(avgP4+1e-12) < 22.0 {
+				if maxP4/(avgP4+1e-12) < 8.0 {
 					continue
 				}
 
@@ -843,37 +848,78 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 					{qDir: -0.5, invertG2: false, swapIQ: true},
 					{qDir: +0.5, invertG2: true, swapIQ: false},
 				} {
-					bestS4 := -1e9
-					bestStep := 0
-					for tStep := 0; tStep < 16; tStep++ {
-						tauI := float64(tStep) / 16.0 * sps
-						var sum4 float64
-						for pos := 1000.0 + tauI; pos < float64(nDec-1000); pos += sps * 16 {
-							vI := real(lrptInterp(zDerot, pos))
-							vQ := imag(lrptInterp(zDerot, pos+stateCfg.qDir*sps))
-							c := complex(vI, vQ)
-							if m := cmplx.Abs(c); m > 1e-9 {
-								c /= complex(m, 0)
+					// Coherent 8-subsegment linear timing drift estimation (tau0 + spsActual)
+					const nSegs = 8
+					const segSyms = 4096
+					var segPhasor [nSegs]complex128
+					for seg := 0; seg < nSegs; seg++ {
+						basePos := 1000.0 + float64(seg*segSyms)*sps
+						for tStep := 0; tStep < 16; tStep++ {
+							tauI := float64(tStep) / 16.0 * sps
+							var sum4 float64
+							for k := 0; k < segSyms; k += 4 {
+								pos := basePos + float64(k)*sps + tauI
+								if pos >= float64(nDec-1000) {
+									break
+								}
+								vI := real(lrptInterp(zDerot, pos))
+								vQ := imag(lrptInterp(zDerot, pos+stateCfg.qDir*sps))
+								c := complex(vI, vQ)
+								if m := cmplx.Abs(c); m > 1e-9 {
+									c /= complex(m, 0)
+								}
+								c2 := c * c
+								sum4 += -real(c2 * c2)
 							}
-							c2 := c * c
-							sum4 += -real(c2 * c2)
-						}
-						if sum4 > bestS4 {
-							bestS4 = sum4
-							bestStep = tStep
+							ang := 2.0 * math.Pi * float64(tStep) / 16.0
+							segPhasor[seg] += complex(sum4*math.Cos(ang), sum4*math.Sin(ang))
 						}
 					}
 
-					tauI := float64(bestStep) / 16.0 * sps
-					var syms []complex128
-					for pos := 500.0 + tauI; pos < float64(nDec-500); pos += sps {
-						vI := real(lrptInterp(zDerot, pos))
-						vQ := imag(lrptInterp(zDerot, pos+stateCfg.qDir*sps))
-						c := complex(vI, vQ)
-						if m := cmplx.Abs(c); m > 1e-9 {
-							c /= complex(m, 0)
+					bestScore := -1.0
+					bestDriftPerSeg := 0.0
+					bestInitPhase := 0.0
+					for d := -32; d <= 32; d++ {
+						driftRadPerSeg := float64(d) * 0.25 * (2.0 * math.Pi / 16.0)
+						var coherentSum complex128
+						for seg := 0; seg < nSegs; seg++ {
+							coherentSum += segPhasor[seg] * cmplx.Rect(1.0, -float64(seg)*driftRadPerSeg)
 						}
+						score := cmplx.Abs(coherentSum)
+						if score > bestScore {
+							bestScore = score
+							bestDriftPerSeg = float64(d) * 0.25
+							bestInitPhase = cmplx.Phase(coherentSum) * 16.0 / (2.0 * math.Pi)
+							if bestInitPhase < 0 {
+								bestInitPhase += 16.0
+							}
+						}
+					}
+
+					spsActual := sps + (bestDriftPerSeg/16.0)*sps/float64(segSyms)
+					nBack := int(math.Floor((1000.0 + (bestInitPhase/16.0)*sps - 500.0) / spsActual))
+					startPos := 1000.0 + (bestInitPhase/16.0)*sps - float64(nBack)*spsActual
+
+					var syms []complex128
+					var rmsSum float64
+					for pos := startPos; pos < float64(nDec-500); pos += spsActual {
+						vI := real(lrptInterp(zDerot, pos))
+						vQ := imag(lrptInterp(zDerot, pos+stateCfg.qDir*spsActual))
+						c := complex(vI, vQ)
+						rmsSum += real(c)*real(c) + imag(c)*imag(c)
 						syms = append(syms, c)
+					}
+					if len(syms) > 0 {
+						rms := math.Sqrt(rmsSum / float64(len(syms)))
+						if rms > 1e-9 {
+							for i, c := range syms {
+								c /= complex(rms, 0)
+								if m := cmplx.Abs(c); m > 2.0 {
+									c *= complex(2.0/m, 0)
+								}
+								syms[i] = c
+							}
+						}
 					}
 
 					soft := make([]float64, len(syms)*2)
@@ -906,23 +952,44 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 									}
 									cadu[bIdx] = b
 								}
-								fixedBytes, validSubwords := rsCorrectCADU(cadu)
+								fixedBytes, validSubwords, validMask := rsCorrectCADU(cadu)
 								vcid := uint8(cadu[5] & 0x3F)
 								counter := (uint32(cadu[6]) << 16) | (uint32(cadu[7]) << 8) | uint32(cadu[8])
-								if vcid == 5 && cadu[4] == 0x40 && validSubwords == 4 {
-									errCost := fixedBytes + asmErr*10
+								if vcid == 5 && cadu[4] == 0x40 && validSubwords > 0 {
 									margin := frameStartBit
 									if rem := len(bits) - (frameStartBit + 8192); rem < margin {
 										margin = rem
 									}
 									mu.Lock()
-									prev, exists := caduMap[counter]
-									if !exists || errCost < prev.errCost || (errCost == prev.errCost && margin > prev.margin) {
-										caduMap[counter] = caduFrame{
-											counter: counter,
-											errCost: errCost,
-											margin:  margin,
-											data:    cadu,
+									if pPrev, pExists := partialMap[counter]; pExists && validMask != 0x0F {
+										for inter := 0; inter < 4; inter++ {
+											bitM := uint8(1 << uint(inter))
+											if (pPrev.validMask&bitM) != 0 && (validMask&bitM) == 0 {
+												for k := 0; k < 255; k++ {
+													cadu[4+4*k+inter] = pPrev.data[4+4*k+inter]
+												}
+												validMask |= bitM
+											}
+										}
+										validSubwords = hamming32(uint32(validMask))
+									}
+									partialMap[counter] = caduFrame{
+										counter:   counter,
+										validMask: validMask,
+										data:      cadu,
+									}
+									// Admit to caduMap when all 4 subwords are RS-verified, or 3 subwords including counter/header (0x0D)
+									if validMask == 0x0F || (validSubwords == 3 && (validMask&0x0D) == 0x0D) {
+										errCost := (4-validSubwords)*200 + fixedBytes + asmErr*10
+										prev, exists := caduMap[counter]
+										if !exists || errCost < prev.errCost || (errCost == prev.errCost && margin > prev.margin) {
+											caduMap[counter] = caduFrame{
+												counter:   counter,
+												errCost:   errCost,
+												margin:    margin,
+												validMask: validMask,
+												data:      cadu,
+											}
 										}
 									}
 									mu.Unlock()
@@ -937,7 +1004,13 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 	}
 	wg.Wait()
 
-	if len(caduMap) < 8 {
+	perfectCADUs := 0
+	for _, cf := range caduMap {
+		if cf.validMask == 0x0F {
+			perfectCADUs++
+		}
+	}
+	if perfectCADUs < 8 {
 		return nil, false, nil
 	}
 
@@ -1102,11 +1175,8 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 	sort.Slice(msList, func(i, j int) bool { return msList[i] < msList[j] })
 	minMs := msList[len(msList)/50] // 2nd percentile to ignore any leading outlier
 
-	type scanLine struct {
-		blocks [3][196][64]uint8 // 0: APID 64 (Vis), 1: APID 65 (NIR), 2: APID 67/68 (IR)
-		valid  [3][196]bool
-	}
-	lineMap := make(map[int]*scanLine)
+	type scanLine = lrptScanLine
+	lineMap := make(map[int]*lrptScanLine)
 	var rawKeys []int
 	for _, s := range segments {
 		key := int(math.Round(float64(int64(s.ms)-int64(minMs)) / 1230.85))
@@ -1115,7 +1185,7 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 		}
 		sl, ok := lineMap[key]
 		if !ok {
-			sl = &scanLine{}
+			sl = &lrptScanLine{}
 			lineMap[key] = sl
 			rawKeys = append(rawKeys, key)
 		}
@@ -1151,12 +1221,12 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 				}
 			}
 		}
-		if validCnt >= 98 {
+		if validCnt >= 84 {
 			// If exactly 1 scanline was missed between two valid scanlines, insert it for smooth vertical interpolation
 			if len(lineKeys) > 0 && k-lineKeys[len(lineKeys)-1] == 2 {
 				midKey := k - 1
 				if _, exists := lineMap[midKey]; !exists {
-					lineMap[midKey] = &scanLine{}
+					lineMap[midKey] = &lrptScanLine{}
 				}
 				lineKeys = append(lineKeys, midKey)
 			}
@@ -1169,205 +1239,9 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 		return nil, false, nil
 	}
 
-	// Compute 2nd and 98th percentile per channel for contrast enhancement
-	var pLow, pHigh [3]float64
-	for ch := 0; ch < 3; ch++ {
-		var hist [256]int
-		totalPix := 0
-		for _, k := range lineKeys {
-			sl := lineMap[k]
-			for col := 0; col < 196; col++ {
-				if sl.valid[ch][col] {
-					blk := sl.blocks[ch][col]
-					for p := 0; p < 64; p++ {
-						hist[blk[p]]++
-						totalPix++
-					}
-				}
-			}
-		}
-		if totalPix == 0 {
-			pLow[ch], pHigh[ch] = 0, 255
-			continue
-		}
-		targetLow := totalPix * 2 / 100
-		targetHigh := totalPix * 98 / 100
-		acc := 0
-		for v := 0; v < 256; v++ {
-			acc += hist[v]
-			if acc >= targetLow {
-				pLow[ch] = float64(v)
-				break
-			}
-		}
-		acc = 0
-		for v := 0; v < 256; v++ {
-			acc += hist[v]
-			if acc >= targetHigh {
-				pHigh[ch] = float64(v)
-				break
-			}
-		}
-		if pHigh[ch]-pLow[ch] < 20 {
-			pLow[ch] = 0
-			pHigh[ch] = 255
-		}
-	}
-
-	stretch := func(v uint8, ch int) float64 {
-		norm := (float64(v) - pLow[ch]) / (pHigh[ch] - pLow[ch])
-		if norm < 0 {
-			return 0
-		}
-		if norm > 1 {
-			return 1
-		}
-		return norm
-	}
-
-	imgW := 1568
-	imgH := numLines * 8
-	fullImg := image.NewRGBA(image.Rect(0, 0, imgW, imgH))
-	chanAImg := image.NewRGBA(image.Rect(0, 0, imgW, imgH))
-	chanBImg := image.NewRGBA(image.Rect(0, 0, imgW, imgH))
-
-	// Resolve missing MCU blocks using smooth boundary-edge vertical interpolation + co-registered cross-channel detail transfer
-	resolved := make([][3][196][64]uint8, numLines)
-	for rowIdx, key := range lineKeys {
-		sl := lineMap[key]
-		for ch := 0; ch < 3; ch++ {
-			for colMCU := 0; colMCU < 196; colMCU++ {
-				if sl.valid[ch][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[ch][colMCU]
-					continue
-				}
-				upIdx, downIdx := -1, -1
-				for d := 1; d <= 5; d++ {
-					if upIdx < 0 && rowIdx-d >= 0 && key-lineKeys[rowIdx-d] <= 5 && lineMap[lineKeys[rowIdx-d]].valid[ch][colMCU] {
-						upIdx = rowIdx - d
-					}
-					if downIdx < 0 && rowIdx+d < numLines && lineKeys[rowIdx+d]-key <= 5 && lineMap[lineKeys[rowIdx+d]].valid[ch][colMCU] {
-						downIdx = rowIdx + d
-					}
-				}
-				var vInterp [64]float64
-				hasVInterp := false
-				if upIdx >= 0 && downIdx >= 0 {
-					bUp := lineMap[lineKeys[upIdx]].blocks[ch][colMCU]
-					bDown := lineMap[lineKeys[downIdx]].blocks[ch][colMCU]
-					totalSteps := float64((downIdx-upIdx-1)*8 + 9)
-					for by := 0; by < 8; by++ {
-						alpha := float64((rowIdx-upIdx-1)*8+by+1) / totalSteps
-						for bx := 0; bx < 8; bx++ {
-							vInterp[by*8+bx] = (1.0-alpha)*float64(bUp[7*8+bx]) + alpha*float64(bDown[0*8+bx])
-						}
-					}
-					hasVInterp = true
-				} else if upIdx >= 0 {
-					bUp := lineMap[lineKeys[upIdx]].blocks[ch][colMCU]
-					for by := 0; by < 8; by++ {
-						for bx := 0; bx < 8; bx++ {
-							vInterp[by*8+bx] = float64(bUp[7*8+bx])
-						}
-					}
-					hasVInterp = true
-				} else if downIdx >= 0 {
-					bDown := lineMap[lineKeys[downIdx]].blocks[ch][colMCU]
-					for by := 0; by < 8; by++ {
-						for bx := 0; bx < 8; bx++ {
-							vInterp[by*8+bx] = float64(bDown[0*8+bx])
-						}
-					}
-					hasVInterp = true
-				}
-
-				// If this is Vis (ch=0) or NIR (ch=1) and the co-registered optical channel is valid on this exact scanline,
-				// transfer its sharp 8x8 high-frequency detail onto our local interpolated DC mean to avoid color bars & blur.
-				otherOpt := 1 - ch
-				if (ch == 0 || ch == 1) && sl.valid[otherOpt][colMCU] {
-					bOther := sl.blocks[otherOpt][colMCU]
-					var meanOther, meanSelf float64
-					for p := 0; p < 64; p++ {
-						meanOther += float64(bOther[p])
-						meanSelf += vInterp[p]
-					}
-					meanOther /= 64.0
-					meanSelf /= 64.0
-					scaleRatio := (pHigh[ch] - pLow[ch]) / (pHigh[otherOpt] - pLow[otherOpt] + 1e-6)
-					if !hasVInterp {
-						meanSelf = pLow[ch] + (meanOther-pLow[otherOpt])*scaleRatio
-					}
-					for p := 0; p < 64; p++ {
-						val := meanSelf + (float64(bOther[p])-meanOther)*scaleRatio
-						if val < 0 {
-							val = 0
-						} else if val > 255 {
-							val = 255
-						}
-						resolved[rowIdx][ch][colMCU][p] = uint8(math.Round(val))
-					}
-				} else if hasVInterp {
-					for p := 0; p < 64; p++ {
-						resolved[rowIdx][ch][colMCU][p] = uint8(math.Max(0, math.Min(255, math.Round(vInterp[p]))))
-					}
-				} else if sl.valid[0][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[0][colMCU]
-				} else if sl.valid[1][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[1][colMCU]
-				} else if sl.valid[2][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[2][colMCU]
-				}
-			}
-		}
-	}
-
-	// Afternoon passes (02:00..10:00 UTC = 11:00..19:00 JST) are South-to-North ascending passes;
-	// rotating 180 degrees orients the map North-Up, West-Left, East-Right.
-	ascendingPass := minMs >= 7200000 && minMs <= 36000000
-
-	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
-		for colMCU := 0; colMCU < 196; colMCU++ {
-			bVis := resolved[rowIdx][0][colMCU]
-			bNIR := resolved[rowIdx][1][colMCU]
-			bIR := resolved[rowIdx][2][colMCU]
-			for by := 0; by < 8; by++ {
-				y := rowIdx*8 + by
-				for bx := 0; bx < 8; bx++ {
-					x := colMCU*8 + bx
-					dstX, dstY := x, y
-					if ascendingPass {
-						dstX = imgW - 1 - x
-						dstY = imgH - 1 - y
-					}
-					p := by*8 + bx
-					vis := stretch(bVis[p], 0)
-					nir := stretch(bNIR[p], 1)
-					ir := stretch(bIR[p], 2)
-
-					vA := uint8(math.Round(vis * 255.0))
-					// Thermal IR: invert so cold cloud tops appear white (standard meteorological convention)
-					vB := uint8(math.Round((1.0 - ir) * 255.0))
-					chanAImg.SetRGBA(dstX, dstY, color.RGBA{R: vA, G: vA, B: vA, A: 255})
-					chanBImg.SetRGBA(dstX, dstY, color.RGBA{R: vB, G: vB, B: vB, A: 255})
-
-					// Natural false-color RGB composite (MSU-MR 1-2-1 + ocean/cloud enhancement)
-					rF := 0.80*nir + 0.20*vis
-					gF := 0.60*nir + 0.40*vis
-					bF := vis
-					if nir < 0.45 && vis < 0.45 {
-						waterFactor := (0.45 - nir) / 0.45
-						rF *= 1.0 - 0.35*waterFactor
-						gF = gF*(1.0-0.15*waterFactor) + 0.06*waterFactor
-						bF = bF + 0.22*waterFactor
-					}
-					r8 := uint8(math.Max(0, math.Min(255, math.Round(rF*255.0))))
-					g8 := uint8(math.Max(0, math.Min(255, math.Round(gF*255.0))))
-					b8 := uint8(math.Max(0, math.Min(255, math.Round(bF*255.0))))
-					fullImg.SetRGBA(dstX, dstY, color.RGBA{R: r8, G: g8, B: b8, A: 255})
-				}
-			}
-		}
-	}
+	fullImg, chanAImg, chanBImg, dayFraction := renderLRPTImages(lineMap, lineKeys, minMs)
+	imgW := fullImg.Bounds().Dx()
+	imgH := fullImg.Bounds().Dy()
 
 	fullPath := filepath.Join(outDir, baseName+"_full.png")
 	chanAPath := filepath.Join(outDir, baseName+"_chanA.png")
@@ -1379,14 +1253,16 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 	_ = writeRGBA(chanAPath, chanAImg)
 	_ = writeRGBA(chanBPath, chanBImg)
 
-	logger.Infof("DECODER", "Pure Go LRPT decoded %d CADUs, packets=%v -> %dx%d imagery: %s",
-		len(caduMap), decodedByAPID, imgW, imgH, fullPath)
+	logger.Infof("DECODER", "Pure Go LRPT decoded %d CADUs, packets=%v, day_fraction=%.2f -> %dx%d imagery: %s",
+		len(caduMap), decodedByAPID, dayFraction, imgW, imgH, fullPath)
 
 	return &DecodeResult{
 		FullImagePath: fullPath,
 		ChanAPath:     chanAPath,
 		ChanBPath:     chanBPath,
 		LineCount:     imgH,
+		DecodeMode:    "lrpt",
+		DayFraction:   dayFraction,
 	}, true, nil
 }
 
@@ -1399,10 +1275,25 @@ func hamming32(x uint32) int {
 	return c
 }
 
-func lrptInterp(z []complex128, pos float64) complex128 {
+func lrptInterp(x []complex128, pos float64) complex128 {
 	idx := int(pos)
 	frac := pos - float64(idx)
-	return z[idx]*complex(1.0-frac, 0) + z[idx+1]*complex(frac, 0)
+	if idx < 1 || idx+2 >= len(x) {
+		if idx >= 0 && idx+1 < len(x) {
+			return x[idx]*complex(1.0-frac, 0) + x[idx+1]*complex(frac, 0)
+		}
+		if idx >= 0 && idx < len(x) {
+			return x[idx]
+		}
+		return 0
+	}
+	y0, y1, y2, y3 := x[idx-1], x[idx], x[idx+1], x[idx+2]
+	c0 := y1
+	c1 := complex(0.5, 0) * (y2 - y0)
+	c2 := y0 - complex(2.5, 0)*y1 + complex(2.0, 0)*y2 - complex(0.5, 0)*y3
+	c3 := complex(0.5, 0)*(y3-y0) + complex(1.5, 0)*(y1-y2)
+	f := complex(frac, 0)
+	return ((c3*f+c2)*f+c1)*f + c0
 }
 
 func fftRadix2(a []complex128) []complex128 {
@@ -1573,6 +1464,8 @@ func decodeLRPTSpectrogramFallback(f *os.File, totalSamples int64, sampleRate in
 		ChanAPath:     chanAPath,
 		ChanBPath:     chanBPath,
 		LineCount:     numLines,
+		DecodeMode:    "lrpt_spectrogram",
+		DayFraction:   0.0,
 	}, nil
 }
 
@@ -1603,4 +1496,338 @@ func writeRGBA(path string, img image.Image) error {
 	}
 	defer f.Close()
 	return png.Encode(f, img)
+}
+
+type lrptScanLine struct {
+	blocks [3][196][64]uint8 // 0: APID 64 (Vis), 1: APID 65 (NIR), 2: APID 67/68 (IR)
+	valid  [3][196]bool
+}
+
+func smoothstep(edge0, edge1, x float64) float64 {
+	t := (x - edge0) / (edge1 - edge0)
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	return t * t * (3.0 - 2.0*t)
+}
+
+func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint32) (fullImg, chanAImg, chanBImg *image.RGBA, dayFraction float64) {
+	numLines := len(lineKeys)
+	if numLines == 0 {
+		return image.NewRGBA(image.Rect(0, 0, 1568, 8)), image.NewRGBA(image.Rect(0, 0, 1568, 8)), image.NewRGBA(image.Rect(0, 0, 1568, 8)), 0.0
+	}
+
+	// 1. Calculate un-stretched line mean for Vis channel (ch0) and smooth day weight w per line
+	const visDarkLo = 18.0
+	const visLitHi = 36.0
+
+	lineVisMean := make([]float64, numLines)
+	hasVis := make([]bool, numLines)
+	var anyVis bool
+
+	for rowIdx, k := range lineKeys {
+		sl := lineMap[k]
+		if sl == nil {
+			continue
+		}
+		var sum float64
+		var cnt int
+		for col := 0; col < 196; col++ {
+			if sl.valid[0][col] {
+				for p := 0; p < 64; p++ {
+					sum += float64(sl.blocks[0][col][p])
+					cnt++
+				}
+			}
+		}
+		if cnt > 0 {
+			lineVisMean[rowIdx] = sum / float64(cnt)
+			hasVis[rowIdx] = true
+			anyVis = true
+		}
+	}
+
+	// Interpolate missing lineVisMean across missing lines
+	if anyVis {
+		for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+			if !hasVis[rowIdx] {
+				upDist, downDist := 999999, 999999
+				upVal, downVal := 0.0, 0.0
+				for d := 1; rowIdx-d >= 0; d++ {
+					if hasVis[rowIdx-d] {
+						upDist = d
+						upVal = lineVisMean[rowIdx-d]
+						break
+					}
+				}
+				for d := 1; rowIdx+d < numLines; d++ {
+					if hasVis[rowIdx+d] {
+						downDist = d
+						downVal = lineVisMean[rowIdx+d]
+						break
+					}
+				}
+				if upDist < downDist {
+					lineVisMean[rowIdx] = upVal
+				} else if downDist < 999999 {
+					lineVisMean[rowIdx] = downVal
+				}
+			}
+		}
+	}
+
+	// Raw day-weight per line via smoothstep
+	rawW := make([]float64, numLines)
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		rawW[rowIdx] = smoothstep(visDarkLo, visLitHi, lineVisMean[rowIdx])
+	}
+
+	// Smooth day-weight w with moving average (radius ±16 lines) to eliminate banding along day/night terminator
+	w := make([]float64, numLines)
+	var sumW float64
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		var s float64
+		var c int
+		for d := -16; d <= 16; d++ {
+			idx := rowIdx + d
+			if idx >= 0 && idx < numLines {
+				s += rawW[idx]
+				c++
+			}
+		}
+		w[rowIdx] = s / float64(c)
+		sumW += w[rowIdx]
+	}
+	dayFraction = sumW / float64(numLines)
+
+	// 2. Compute 2nd and 98th percentile per channel
+	// For ch0 (Vis) and ch1 (NIR), accumulate only from lit lines (w >= 0.5) to avoid night noise polluting daytime contrast.
+	// For ch2 (IR), accumulate from all lines.
+	var pLow, pHigh [3]float64
+	for ch := 0; ch < 3; ch++ {
+		var hist [256]int
+		totalPix := 0
+		for rowIdx, k := range lineKeys {
+			if (ch == 0 || ch == 1) && w[rowIdx] < 0.5 {
+				continue
+			}
+			sl := lineMap[k]
+			if sl == nil {
+				continue
+			}
+			for col := 0; col < 196; col++ {
+				if sl.valid[ch][col] {
+					blk := sl.blocks[ch][col]
+					for p := 0; p < 64; p++ {
+						hist[blk[p]]++
+						totalPix++
+					}
+				}
+			}
+		}
+		if totalPix == 0 {
+			pLow[ch], pHigh[ch] = 0, 255
+			continue
+		}
+		targetLow := totalPix * 2 / 100
+		targetHigh := totalPix * 98 / 100
+		acc := 0
+		for v := 0; v < 256; v++ {
+			acc += hist[v]
+			if acc >= targetLow {
+				pLow[ch] = float64(v)
+				break
+			}
+		}
+		acc = 0
+		for v := 0; v < 256; v++ {
+			acc += hist[v]
+			if acc >= targetHigh {
+				pHigh[ch] = float64(v)
+				break
+			}
+		}
+		if pHigh[ch]-pLow[ch] < 20 {
+			pLow[ch] = 0
+			pHigh[ch] = 255
+		}
+	}
+
+	stretch := func(v uint8, ch int) float64 {
+		norm := (float64(v) - pLow[ch]) / (pHigh[ch] - pLow[ch])
+		if norm < 0 {
+			return 0
+		}
+		if norm > 1 {
+			return 1
+		}
+		return norm
+	}
+
+	imgW := 1568
+	imgH := numLines * 8
+	fullImg = image.NewRGBA(image.Rect(0, 0, imgW, imgH))
+	chanAImg = image.NewRGBA(image.Rect(0, 0, imgW, imgH))
+	chanBImg = image.NewRGBA(image.Rect(0, 0, imgW, imgH))
+
+	// 3. Resolve missing MCU blocks using smooth boundary-edge vertical interpolation
+	// + co-registered cross-channel detail transfer (applied when daytime detail is present)
+	resolved := make([][3][196][64]uint8, numLines)
+	for rowIdx, key := range lineKeys {
+		sl := lineMap[key]
+		if sl == nil {
+			continue
+		}
+		for ch := 0; ch < 3; ch++ {
+			for colMCU := 0; colMCU < 196; colMCU++ {
+				if sl.valid[ch][colMCU] {
+					resolved[rowIdx][ch][colMCU] = sl.blocks[ch][colMCU]
+					continue
+				}
+				upIdx, downIdx := -1, -1
+				for d := 1; d <= 5; d++ {
+					if upIdx < 0 && rowIdx-d >= 0 && key-lineKeys[rowIdx-d] <= 5 && lineMap[lineKeys[rowIdx-d]].valid[ch][colMCU] {
+						upIdx = rowIdx - d
+					}
+					if downIdx < 0 && rowIdx+d < numLines && lineKeys[rowIdx+d]-key <= 5 && lineMap[lineKeys[rowIdx+d]].valid[ch][colMCU] {
+						downIdx = rowIdx + d
+					}
+				}
+				var vInterp [64]float64
+				hasVInterp := false
+				if upIdx >= 0 && downIdx >= 0 {
+					bUp := lineMap[lineKeys[upIdx]].blocks[ch][colMCU]
+					bDown := lineMap[lineKeys[downIdx]].blocks[ch][colMCU]
+					totalSteps := float64((downIdx-upIdx-1)*8 + 9)
+					for by := 0; by < 8; by++ {
+						alpha := float64((rowIdx-upIdx-1)*8+by+1) / totalSteps
+						for bx := 0; bx < 8; bx++ {
+							vInterp[by*8+bx] = (1.0-alpha)*float64(bUp[7*8+bx]) + alpha*float64(bDown[0*8+bx])
+						}
+					}
+					hasVInterp = true
+				} else if upIdx >= 0 {
+					bUp := lineMap[lineKeys[upIdx]].blocks[ch][colMCU]
+					for by := 0; by < 8; by++ {
+						for bx := 0; bx < 8; bx++ {
+							vInterp[by*8+bx] = float64(bUp[7*8+bx])
+						}
+					}
+					hasVInterp = true
+				} else if downIdx >= 0 {
+					bDown := lineMap[lineKeys[downIdx]].blocks[ch][colMCU]
+					for by := 0; by < 8; by++ {
+						for bx := 0; bx < 8; bx++ {
+							vInterp[by*8+bx] = float64(bDown[0*8+bx])
+						}
+					}
+					hasVInterp = true
+				}
+
+				// Cross-channel optical texture transfer (only when line is lit, w >= 0.5)
+				otherOpt := 1 - ch
+				if (ch == 0 || ch == 1) && w[rowIdx] >= 0.5 && sl.valid[otherOpt][colMCU] {
+					bOther := sl.blocks[otherOpt][colMCU]
+					var meanOther, meanSelf float64
+					for p := 0; p < 64; p++ {
+						meanOther += float64(bOther[p])
+						meanSelf += vInterp[p]
+					}
+					meanOther /= 64.0
+					meanSelf /= 64.0
+					scaleRatio := (pHigh[ch] - pLow[ch]) / (pHigh[otherOpt] - pLow[otherOpt] + 1e-6)
+					if !hasVInterp {
+						meanSelf = pLow[ch] + (meanOther-pLow[otherOpt])*scaleRatio
+					}
+					for p := 0; p < 64; p++ {
+						val := meanSelf + (float64(bOther[p])-meanOther)*scaleRatio
+						if val < 0 {
+							val = 0
+						} else if val > 255 {
+							val = 255
+						}
+						resolved[rowIdx][ch][colMCU][p] = uint8(math.Round(val))
+					}
+				} else if hasVInterp {
+					for p := 0; p < 64; p++ {
+						resolved[rowIdx][ch][colMCU][p] = uint8(math.Max(0, math.Min(255, math.Round(vInterp[p]))))
+					}
+				} else if sl.valid[0][colMCU] {
+					resolved[rowIdx][ch][colMCU] = sl.blocks[0][colMCU]
+				} else if sl.valid[1][colMCU] {
+					resolved[rowIdx][ch][colMCU] = sl.blocks[1][colMCU]
+				} else if sl.valid[2][colMCU] {
+					bIR := sl.blocks[2][colMCU]
+					for p := 0; p < 64; p++ {
+						invIR := 1.0 - stretch(bIR[p], 2)
+						val := pLow[ch] + invIR*(pHigh[ch]-pLow[ch])
+						resolved[rowIdx][ch][colMCU][p] = uint8(math.Max(0, math.Min(255, math.Round(val))))
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Compose images and apply ascending rotation
+	ascendingPass := minMs >= 7200000 && minMs <= 36000000
+
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		weight := w[rowIdx]
+		for colMCU := 0; colMCU < 196; colMCU++ {
+			bVis := resolved[rowIdx][0][colMCU]
+			bNIR := resolved[rowIdx][1][colMCU]
+			bIR := resolved[rowIdx][2][colMCU]
+			for by := 0; by < 8; by++ {
+				y := rowIdx*8 + by
+				for bx := 0; bx < 8; bx++ {
+					x := colMCU*8 + bx
+					dstX, dstY := x, y
+					if ascendingPass {
+						dstX = imgW - 1 - x
+						dstY = imgH - 1 - y
+					}
+					p := by*8 + bx
+					vis := stretch(bVis[p], 0)
+					nir := stretch(bNIR[p], 1)
+					ir := stretch(bIR[p], 2)
+
+					// Chan A (Visible)
+					vA := uint8(math.Round(vis * 255.0))
+					// Chan B (Thermal IR: inverted so cold cloud tops appear white)
+					vB := uint8(math.Round((1.0 - ir) * 255.0))
+					chanAImg.SetRGBA(dstX, dstY, color.RGBA{R: vA, G: vA, B: vA, A: 255})
+					chanBImg.SetRGBA(dstX, dstY, color.RGBA{R: vB, G: vB, B: vB, A: 255})
+
+					// Daytime false-color RGB (MSU-MR 1-2-1 + ocean/cloud enhancement)
+					rDay := 0.80*nir + 0.20*vis
+					gDay := 0.60*nir + 0.40*vis
+					bDay := vis
+					if nir < 0.45 && vis < 0.45 {
+						waterFactor := (0.45 - nir) / 0.45
+						rDay *= 1.0 - 0.35*waterFactor
+						gDay = gDay*(1.0-0.15*waterFactor) + 0.06*waterFactor
+						bDay = bDay + 0.22*waterFactor
+					}
+
+					// Nighttime thermal IR (inverted grayscale: cold clouds = white, warm sea = dark)
+					nightVal := 1.0 - ir
+
+					// Smooth blend between daytime false-color and nighttime thermal IR
+					rF := weight*rDay + (1.0-weight)*nightVal
+					gF := weight*gDay + (1.0-weight)*nightVal
+					bF := weight*bDay + (1.0-weight)*nightVal
+
+					r8 := uint8(math.Max(0, math.Min(255, math.Round(rF*255.0))))
+					g8 := uint8(math.Max(0, math.Min(255, math.Round(gF*255.0))))
+					b8 := uint8(math.Max(0, math.Min(255, math.Round(bF*255.0))))
+					fullImg.SetRGBA(dstX, dstY, color.RGBA{R: r8, G: g8, B: b8, A: 255})
+				}
+			}
+		}
+	}
+
+	return fullImg, chanAImg, chanBImg, dayFraction
 }
