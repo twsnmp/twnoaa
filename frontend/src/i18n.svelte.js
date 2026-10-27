@@ -214,7 +214,13 @@ const translations = {
       statusRunning: "Running multi-modal LLM meteorological analysis...",
       statusCompleted: "Analysis completed successfully!",
       statusError: "Error starting AI analysis: ",
-      statusFailed: "AI Analysis Failed: "
+      statusFailed: "AI Analysis Failed: ",
+      modalTitle: "AI Meteorological Analysis in Progress...",
+      modalDesc: "Multi-modal LLM is inspecting cloud patterns, weather fronts, and atmospheric conditions...",
+      copyReport: "Copy Report",
+      copied: "Copied!",
+      closeModal: "Close",
+      cancelWait: "Close (Continue in Background)"
     },
     settings: {
       title: "Station Settings & Location",
@@ -473,7 +479,13 @@ const translations = {
       statusRunning: "マルチモーダル LLM 気象解析を実行中...",
       statusCompleted: "AI解析が正常に完了しました！",
       statusError: "AI解析の開始エラー: ",
-      statusFailed: "AI解析に失敗しました: "
+      statusFailed: "AI解析に失敗しました: ",
+      modalTitle: "AI気象解析を実行中...",
+      modalDesc: "マルチモーダルAIが衛星画像の雲パターン・前線・気圧配置を詳細推論しています...",
+      copyReport: "レポートをコピー",
+      copied: "コピー完了",
+      closeModal: "閉じる",
+      cancelWait: "閉じる (バックグラウンドで継続)"
     },
     settings: {
       title: "地上局位置 ＆ SDR・LLM設定",

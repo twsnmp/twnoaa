@@ -31,3 +31,104 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* Modal and Cat Logo Animations */
+@keyframes cat-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(-1.5deg);
+  }
+}
+
+@keyframes cat-bounce-rhythm {
+  0%, 100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  30% {
+    transform: translateY(-8px) scale(0.97, 1.03);
+  }
+  50% {
+    transform: translateY(0) scale(1.02, 0.98);
+  }
+  70% {
+    transform: translateY(-3px) scale(0.99, 1.01);
+  }
+}
+
+@keyframes cat-pulse-glow {
+  0%, 100% {
+    transform: scale(0.95);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.7;
+  }
+}
+
+@keyframes cat-radar-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes cat-spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cat-scan-beam {
+  0%, 100% {
+    top: 5%;
+    opacity: 0.3;
+  }
+  50% {
+    top: 85%;
+    opacity: 0.8;
+  }
+}
+
+.animate-cat-float {
+  animation: cat-float 3s ease-in-out infinite;
+}
+
+.animate-cat-bounce {
+  animation: cat-bounce-rhythm 2s ease-in-out infinite;
+}
+
+.animate-cat-pulse-glow {
+  animation: cat-pulse-glow 2.5s ease-in-out infinite;
+}
+
+.animate-cat-radar {
+  animation: cat-radar-pulse 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+.animate-cat-radar-delayed {
+  animation: cat-radar-pulse 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+  animation-delay: 1.1s;
+}
+
+.animate-spin-slow {
+  animation: cat-spin-slow 8s linear infinite;
+}
+
+.animate-spin-reverse-slow {
+  animation: cat-spin-slow 12s linear infinite reverse;
+}
+
+.animate-scan-beam {
+  animation: cat-scan-beam 2s ease-in-out infinite;
+}
+
