@@ -1053,60 +1053,40 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 		seqCnt := ((uint16(pkt[2]) & 0x3F) << 8) | uint16(pkt[3])
 		msOfDay := (uint32(pkt[8]) << 24) | (uint32(pkt[9]) << 16) | (uint32(pkt[10]) << 8) | uint32(pkt[11])
 		blocks, validMCUs := decode14MCUs(pkt[20:], qFactor, dcTab, acTab)
-		if !rsPerfect {
-			if validMCUs < 14 {
+		if validMCUs < 14 {
+			// Safely salvage partial packets for weak SNR passes (validMCUs >= 6)
+			// Truncate the last 2 MCUs before the bitstream error to avoid DC drift artifacts
+			if validMCUs < 6 {
 				return
 			}
-			for m := 0; m < validMCUs; m++ {
-				var diffSum int
-				blk := blocks[m]
-				for y := 0; y < 7; y++ {
-					for x := 0; x < 7; x++ {
-						d1 := int(blk[y*8+x]) - int(blk[y*8+x+1])
-						if d1 < 0 {
-							d1 = -d1
-						}
-						d2 := int(blk[y*8+x]) - int(blk[(y+1)*8+x])
-						if d2 < 0 {
-							d2 = -d2
-						}
-						diffSum += d1 + d2
-					}
-				}
-				if diffSum > 49*2*25 {
-					validMCUs = m
-					break
-				}
-				if m > 0 {
-					var seamDiff int
-					prevBlk := blocks[m-1]
-					for y := 0; y < 8; y++ {
-						d := int(prevBlk[y*8+7]) - int(blk[y*8+0])
-						if d < 0 {
-							d = -d
-						}
-						seamDiff += d
-					}
-					if seamDiff > 8*40 {
-						validMCUs = m
-						break
-					}
-				}
+			safeMCUs := validMCUs - 2
+			var sumStart, sumEnd int
+			for p := 0; p < 64; p++ {
+				sumStart += int(blocks[0][p])
+				sumEnd += int(blocks[safeMCUs-1][p])
 			}
-		} else if validMCUs < 14 {
-			validMCUs -= 2
+			meanStart := float64(sumStart) / 64.0
+			meanEnd := float64(sumEnd) / 64.0
+
+			// Reject if clipped to pure white (255) or pure black (0)
+			if meanStart <= 3.0 || meanStart >= 252.0 || meanEnd <= 3.0 || meanEnd >= 252.0 {
+				return
+			}
+			// Reject if intra-packet DC runaway occurred (> 90 luminance jump)
+			if math.Abs(meanEnd-meanStart) > 90.0 {
+				return
+			}
+			validMCUs = safeMCUs
 		}
-		if validMCUs > 0 {
-			decodedByAPID[apid]++
-			segments = append(segments, mcuSegment{
-				apid:      apid,
-				seqCnt:    seqCnt,
-				ms:        msOfDay,
-				mcuID:     mcuID,
-				validMCUs: validMCUs,
-				blocks:    blocks,
-			})
-		}
+		decodedByAPID[apid]++
+		segments = append(segments, mcuSegment{
+			apid:      apid,
+			seqCnt:    seqCnt,
+			ms:        msOfDay,
+			mcuID:     mcuID,
+			validMCUs: validMCUs,
+			blocks:    blocks,
+		})
 	}
 
 	for _, c := range counters {
@@ -1152,94 +1132,229 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 		return nil, false, nil
 	}
 
-	// Clean outlier timestamps using local 5-packet median
-	for i := range segments {
-		var window []uint32
-		for j := i - 2; j <= i+2; j++ {
-			if j >= 0 && j < len(segments) {
-				window = append(window, segments[j].ms)
+	// 1. Detect 00:00 UTC rollover in segments (86,400,000 ms = 24h)
+	type timeSegment struct {
+		mcuSegment
+		totalMs int64
+	}
+	timeSegs := make([]timeSegment, len(segments))
+	var dayOffset int64
+	var prevRawMs uint32
+	if len(segments) > 0 {
+		prevRawMs = segments[0].ms
+	}
+	for i, s := range segments {
+		if prevRawMs > 70000000 && s.ms < 15000000 {
+			dayOffset += 86400000
+		} else if s.ms > 70000000 && prevRawMs < 15000000 && dayOffset >= 86400000 {
+			dayOffset -= 86400000
+		}
+		prevRawMs = s.ms
+		timeSegs[i] = timeSegment{
+			mcuSegment: s,
+			totalMs:    int64(s.ms) + dayOffset,
+		}
+	}
+
+	// Sort segments primarily by totalMs, secondarily by mcuID
+	sort.Slice(timeSegs, func(i, j int) bool {
+		if timeSegs[i].totalMs != timeSegs[j].totalMs {
+			return timeSegs[i].totalMs < timeSegs[j].totalMs
+		}
+		return timeSegs[i].mcuID < timeSegs[j].mcuID
+	})
+
+	// 2. Compute and log statistics per APID (packets, min, max, p02, p98, mean)
+	type apidStats struct {
+		count int
+		min   uint8
+		max   uint8
+		pLow  float64
+		pHigh float64
+		mean  float64
+	}
+	statsByAPID := make(map[uint16]apidStats)
+	for apid := uint16(64); apid <= 69; apid++ {
+		var hist [256]int
+		totalPix := 0
+		var sumPix float64
+		minVal := uint8(255)
+		maxVal := uint8(0)
+		pktCount := 0
+
+		for _, ts := range timeSegs {
+			if ts.apid == apid {
+				pktCount++
+				for m := 0; m < 14; m++ {
+					for p := 0; p < 64; p++ {
+						v := ts.blocks[m][p]
+						hist[v]++
+						totalPix++
+						sumPix += float64(v)
+						if v < minVal {
+							minVal = v
+						}
+						if v > maxVal {
+							maxVal = v
+						}
+					}
+				}
 			}
 		}
-		sort.Slice(window, func(a, b int) bool { return window[a] < window[b] })
-		med := window[len(window)/2]
-		if math.Abs(float64(int64(segments[i].ms)-int64(med))) > 2000 {
-			segments[i].ms = med
+
+		if totalPix > 0 {
+			tLow := totalPix * 2 / 100
+			tHigh := totalPix * 98 / 100
+			acc := 0
+			var pLow, pHigh float64
+			for v := 0; v < 256; v++ {
+				acc += hist[v]
+				if acc >= tLow && pLow == 0 {
+					pLow = float64(v)
+				}
+				if acc >= tHigh {
+					pHigh = float64(v)
+					break
+				}
+			}
+			statsByAPID[apid] = apidStats{
+				count: pktCount,
+				min:   minVal,
+				max:   maxVal,
+				pLow:  pLow,
+				pHigh: pHigh,
+				mean:  sumPix / float64(totalPix),
+			}
+			logger.Infof("DECODER", "APID %d stats: packets=%d, min=%d, max=%d, p02=%.1f, p98=%.1f, mean=%.1f",
+				apid, pktCount, minVal, maxVal, pLow, pHigh, sumPix/float64(totalPix))
 		}
 	}
 
-	// Find robust minimum timestamp
-	msList := make([]uint32, len(segments))
-	for i, s := range segments {
-		msList[i] = s.ms
-	}
-	sort.Slice(msList, func(i, j int) bool { return msList[i] < msList[j] })
-	minMs := msList[len(msList)/50] // 2nd percentile to ignore any leading outlier
-
+	// 3. Cluster packets into scanlines by timestamp proximity (< 250ms)
+	// Eliminates segOffset subtraction and prevents scanline splitting across rounding boundaries
+	const scanPeriod = 1230.85
+	var currentClusterMs int64 = -1
+	currentKey := 0
 	type scanLine = lrptScanLine
 	lineMap := make(map[int]*lrptScanLine)
-	var rawKeys []int
-	for _, s := range segments {
-		key := int(math.Round(float64(int64(s.ms)-int64(minMs)) / 1230.85))
-		if key < -10 || key > 1000 {
-			continue
+	var validKeys []int
+
+	// Determine APID channel routing:
+	// APID 64 -> Ch 0 (Visible)
+	// APID 65 -> Ch 1 (NIR)
+	// Ch 2: True Thermal IR preference: APID 68 -> APID 67 -> APID 69 -> fallback APID 66
+	targetIRAPID := uint16(0)
+	isThermalIR := false
+	if statsByAPID[68].count > 0 {
+		targetIRAPID = 68
+		isThermalIR = true
+	} else if statsByAPID[67].count > 0 {
+		targetIRAPID = 67
+		isThermalIR = true
+	} else if statsByAPID[69].count > 0 {
+		targetIRAPID = 69
+		isThermalIR = true
+	} else if statsByAPID[66].count > 0 {
+		targetIRAPID = 66
+		isThermalIR = false // Optical SWIR (1.6µm), not thermal!
+	}
+	logger.Infof("DECODER", "Channel routing: Ch0=APID 64, Ch1=APID 65, Ch2=APID %d (isThermalIR=%v)",
+		targetIRAPID, isThermalIR)
+
+	for _, ts := range timeSegs {
+		// MSU-MR mirror scans West to East in 1230.85ms, transmitting 14 MCU segments per channel.
+		// Subtracting nominal transmission delay aligns all 14 segments to scanline start.
+		segOffsetMs := int64(float64(ts.mcuID/14) * (scanPeriod / 14.0))
+		normMs := ts.totalMs - segOffsetMs
+
+		if currentClusterMs < 0 {
+			currentClusterMs = normMs
+			currentKey = 0
+		} else {
+			diff := normMs - currentClusterMs
+			if diff > 600 { // New scanline cluster (threshold is approx half scanPeriod 1230.85ms)
+				skipped := int(math.Round(float64(diff) / scanPeriod))
+				if skipped < 1 {
+					skipped = 1
+				}
+				currentKey += skipped
+				currentClusterMs = normMs
+			}
 		}
-		sl, ok := lineMap[key]
-		if !ok {
-			sl = &lrptScanLine{}
-			lineMap[key] = sl
-			rawKeys = append(rawKeys, key)
-		}
+
+		key := currentKey
 		chIdx := -1
-		switch s.apid {
+		switch ts.apid {
 		case 64:
 			chIdx = 0
 		case 65:
 			chIdx = 1
-		case 66, 67, 68, 69:
+		case targetIRAPID:
 			chIdx = 2
 		}
-		if chIdx >= 0 {
-			for m := 0; m < s.validMCUs; m++ {
-				colMCU := s.mcuID + m
-				if colMCU >= 0 && colMCU < 196 {
-					sl.blocks[chIdx][colMCU] = s.blocks[m]
-					sl.valid[chIdx][colMCU] = true
-				}
+		if chIdx < 0 {
+			continue
+		}
+
+		sl, ok := lineMap[key]
+		if !ok {
+			sl = &lrptScanLine{}
+			lineMap[key] = sl
+			validKeys = append(validKeys, key)
+		}
+
+		// Absolute X coordinate placement: X = mcuID * 8, spans 14 MCUs (112 px)
+		for m := 0; m < ts.validMCUs; m++ {
+			colMCU := ts.mcuID + m
+			if colMCU >= 0 && colMCU < 196 {
+				sl.blocks[chIdx][colMCU] = ts.blocks[m]
+				sl.valid[chIdx][colMCU] = true
 			}
 		}
 	}
-	sort.Ints(rawKeys)
 
-	var lineKeys []int
-	for _, k := range rawKeys {
-		sl := lineMap[k]
-		validCnt := 0
-		for ch := 0; ch < 3; ch++ {
-			for col := 0; col < 196; col++ {
-				if sl.valid[ch][col] {
-					validCnt++
-				}
-			}
-		}
-		if validCnt >= 84 {
-			// If exactly 1 scanline was missed between two valid scanlines, insert it for smooth vertical interpolation
-			if len(lineKeys) > 0 && k-lineKeys[len(lineKeys)-1] == 2 {
-				midKey := k - 1
-				if _, exists := lineMap[midKey]; !exists {
-					lineMap[midKey] = &lrptScanLine{}
-				}
-				lineKeys = append(lineKeys, midKey)
-			}
-			lineKeys = append(lineKeys, k)
-		}
+	if len(validKeys) == 0 {
+		return nil, false, nil
+	}
+	sort.Ints(validKeys)
+
+	// 4. Absolute scan line grid allocation (preventing line collapse and OOM)
+	minKey := validKeys[0]
+	maxKey := validKeys[len(validKeys)-1]
+
+	const maxAllowedLines = 1200 // Max 1200 scan lines (~16 minutes pass, 9600px height) to prevent OOM
+	if maxKey-minKey+1 > maxAllowedLines {
+		maxKey = minKey + maxAllowedLines - 1
 	}
 
-	numLines := len(lineKeys)
+	numLines := maxKey - minKey + 1
 	if numLines < 3 {
 		return nil, false, nil
 	}
 
-	fullImg, chanAImg, chanBImg, dayFraction := renderLRPTImages(lineMap, lineKeys, minMs)
+	// lineKeys covers every consecutive scanline index from minKey to maxKey.
+	// Missed lines remain in lineMap as nil/empty (preventing vertical aspect ratio collapse).
+	lineKeys := make([]int, numLines)
+	for i := 0; i < numLines; i++ {
+		lineKeys[i] = minKey + i
+	}
+
+	logger.Infof("DECODER", "DEBUG timeSegs[0].totalMs = %d (%.2fh), last.totalMs = %d (%.2fh), delta = %d ms (%.1fs)",
+		timeSegs[0].totalMs, float64(timeSegs[0].totalMs)/3600000.0,
+		timeSegs[len(timeSegs)-1].totalMs, float64(timeSegs[len(timeSegs)-1].totalMs)/3600000.0,
+		timeSegs[len(timeSegs)-1].totalMs-timeSegs[0].totalMs,
+		float64(timeSegs[len(timeSegs)-1].totalMs-timeSegs[0].totalMs)/1000.0)
+	minMs := uint32(timeSegs[0].totalMs % 86400000)
+
+
+
+	fullImg, chanAImg, chanBImg, dayFraction := renderLRPTImages(lineMap, lineKeys, minMs, isThermalIR)
+
+	// Apply Earth-curvature tangential scanner distortion rectification
+	fullImg = RectifyLRPTTangential(fullImg)
+	chanAImg = RectifyLRPTTangential(chanAImg)
+	chanBImg = RectifyLRPTTangential(chanBImg)
+
 	imgW := fullImg.Bounds().Dx()
 	imgH := fullImg.Bounds().Dy()
 
@@ -1514,13 +1629,13 @@ func smoothstep(edge0, edge1, x float64) float64 {
 	return t * t * (3.0 - 2.0*t)
 }
 
-func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint32) (fullImg, chanAImg, chanBImg *image.RGBA, dayFraction float64) {
+func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint32, isThermalIR bool) (fullImg, chanAImg, chanBImg *image.RGBA, dayFraction float64) {
 	numLines := len(lineKeys)
 	if numLines == 0 {
 		return image.NewRGBA(image.Rect(0, 0, 1568, 8)), image.NewRGBA(image.Rect(0, 0, 1568, 8)), image.NewRGBA(image.Rect(0, 0, 1568, 8)), 0.0
 	}
 
-	// 1. Calculate un-stretched line mean for Vis channel (ch0) and smooth day weight w per line
+	// Calculate un-stretched line mean for Vis channel (ch0) and smooth day weight w per line
 	const visDarkLo = 18.0
 	const visLitHi = 36.0
 
@@ -1528,25 +1643,40 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 	hasVis := make([]bool, numLines)
 	var anyVis bool
 
+	lineIRMean := make([]float64, numLines)
+	hasIR := make([]bool, numLines)
+	var anyIR bool
+
 	for rowIdx, k := range lineKeys {
 		sl := lineMap[k]
 		if sl == nil {
 			continue
 		}
-		var sum float64
-		var cnt int
+		var sumVis, sumIR float64
+		var cntVis, cntIR int
 		for col := 0; col < 196; col++ {
 			if sl.valid[0][col] {
 				for p := 0; p < 64; p++ {
-					sum += float64(sl.blocks[0][col][p])
-					cnt++
+					sumVis += float64(sl.blocks[0][col][p])
+					cntVis++
+				}
+			}
+			if sl.valid[2][col] {
+				for p := 0; p < 64; p++ {
+					sumIR += float64(sl.blocks[2][col][p])
+					cntIR++
 				}
 			}
 		}
-		if cnt > 0 {
-			lineVisMean[rowIdx] = sum / float64(cnt)
+		if cntVis > 0 {
+			lineVisMean[rowIdx] = sumVis / float64(cntVis)
 			hasVis[rowIdx] = true
 			anyVis = true
+		}
+		if cntIR > 0 {
+			lineIRMean[rowIdx] = sumIR / float64(cntIR)
+			hasIR[rowIdx] = true
+			anyIR = true
 		}
 	}
 
@@ -1576,6 +1706,63 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 					lineVisMean[rowIdx] = downVal
 				}
 			}
+		}
+	}
+
+	// Interpolate missing lineIRMean across missing lines
+	if anyIR {
+		for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+			if !hasIR[rowIdx] {
+				upDist, downDist := 999999, 999999
+				upVal, downVal := 0.0, 0.0
+				for d := 1; rowIdx-d >= 0; d++ {
+					if hasIR[rowIdx-d] {
+						upDist = d
+						upVal = lineIRMean[rowIdx-d]
+						break
+					}
+				}
+				for d := 1; rowIdx+d < numLines; d++ {
+					if hasIR[rowIdx+d] {
+						downDist = d
+						downVal = lineIRMean[rowIdx+d]
+						break
+					}
+				}
+				if upDist < downDist {
+					lineIRMean[rowIdx] = upVal
+				} else if downDist < 999999 {
+					lineIRMean[rowIdx] = downVal
+				}
+			}
+		}
+	}
+
+	// Smooth lineIRMean with moving average (±16 lines) for stable adaptive polarity
+	smoothIRMean := make([]float64, numLines)
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		var s float64
+		var c int
+		for d := -16; d <= 16; d++ {
+			idx := rowIdx + d
+			if idx >= 0 && idx < numLines {
+				s += lineIRMean[idx]
+				c++
+			}
+		}
+		smoothIRMean[rowIdx] = s / float64(c)
+	}
+
+	// IR Invert polarity weight per line:
+	// For cold cloud tops (lineIRMean <= 65), cold clouds have lower counts than sea (73) -> inverted (1.0).
+	// For MWIR warm/reflective water droplet clouds (lineIRMean >= 80), clouds have higher counts than sea (73) -> non-inverted (0.0).
+	// For pure optical SWIR (isThermalIR=false), always non-inverted (0.0).
+	irInvertWeight := make([]float64, numLines)
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		if !isThermalIR {
+			irInvertWeight[rowIdx] = 0.0
+		} else {
+			irInvertWeight[rowIdx] = smoothstep(80.0, 65.0, smoothIRMean[rowIdx])
 		}
 	}
 
@@ -1633,7 +1820,10 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 			continue
 		}
 		targetLow := totalPix * 2 / 100
-		targetHigh := totalPix * 98 / 100
+		targetHigh := totalPix * 995 / 1000
+		if targetHigh <= targetLow {
+			targetHigh = totalPix * 98 / 100
+		}
 		acc := 0
 		for v := 0; v < 256; v++ {
 			acc += hist[v]
@@ -1650,14 +1840,100 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 				break
 			}
 		}
-		if pHigh[ch]-pLow[ch] < 20 {
-			pLow[ch] = 0
-			pHigh[ch] = 255
-		}
 	}
 
 	stretch := func(v uint8, ch int) float64 {
-		norm := (float64(v) - pLow[ch]) / (pHigh[ch] - pLow[ch])
+		span := (pHigh[ch] - pLow[ch]) * 1.06
+		if span < 8.0 {
+			// For extremely flat channels (e.g. dark current noise), avoid noise blow-up by capping gain
+			span = 25.0
+		}
+		norm := (float64(v) - pLow[ch]) / span
+		if norm < 0 {
+			return 0
+		}
+		if norm > 1 {
+			return 1
+		}
+		return norm
+	}
+
+	// Line-local adaptive dynamic range for thermal IR (window radius ±24 lines = ±192px)
+	// to adapt smoothly to latitudinal surface temperature gradients (e.g. cold Siberia vs warm Kuroshio)
+	// while preserving cloud vs sea contrast everywhere.
+	locLowIR := make([]float64, numLines)
+	locHighIR := make([]float64, numLines)
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		var hist [256]int
+		totalPix := 0
+		for d := -24; d <= 24; d++ {
+			idx := rowIdx + d
+			if idx >= 0 && idx < numLines {
+				k := lineKeys[idx]
+				sl := lineMap[k]
+				if sl != nil {
+					for col := 0; col < 196; col++ {
+						if sl.valid[2][col] {
+							blk := sl.blocks[2][col]
+							for p := 0; p < 64; p++ {
+								hist[blk[p]]++
+								totalPix++
+							}
+						}
+					}
+				}
+			}
+		}
+		if totalPix > 200 {
+			tLow := totalPix * 2 / 100
+			tHigh := totalPix * 98 / 100
+			acc := 0
+			var pL, pH float64
+			for v := 0; v < 256; v++ {
+				acc += hist[v]
+				if acc >= tLow && pL == 0 {
+					pL = float64(v)
+				}
+				if acc >= tHigh {
+					pH = float64(v)
+					break
+				}
+			}
+			locLowIR[rowIdx] = pL
+			locHighIR[rowIdx] = pH
+		} else {
+			locLowIR[rowIdx] = pLow[2]
+			locHighIR[rowIdx] = pHigh[2]
+		}
+	}
+
+	// Smooth locLowIR and locHighIR with moving average (±8 lines)
+	smoothLowIR := make([]float64, numLines)
+	smoothHighIR := make([]float64, numLines)
+	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
+		var sL, sH float64
+		var c int
+		for d := -8; d <= 8; d++ {
+			idx := rowIdx + d
+			if idx >= 0 && idx < numLines {
+				sL += locLowIR[idx]
+				sH += locHighIR[idx]
+				c++
+			}
+		}
+		smoothLowIR[rowIdx] = sL / float64(c)
+		smoothHighIR[rowIdx] = sH / float64(c)
+	}
+
+	stretchIR := func(v uint8, rowIdx int) float64 {
+		// Blend 10% global with 90% smoothed local window for crisp ocean/cloud contrast in all latitudes
+		low := 0.1*pLow[2] + 0.9*smoothLowIR[rowIdx]
+		high := 0.1*pHigh[2] + 0.9*smoothHighIR[rowIdx]
+		span := high - low
+		if span < 12.0 {
+			span = 25.0
+		}
+		norm := (float64(v) - low) / span
 		if norm < 0 {
 			return 0
 		}
@@ -1673,31 +1949,73 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 	chanAImg = image.NewRGBA(image.Rect(0, 0, imgW, imgH))
 	chanBImg = image.NewRGBA(image.Rect(0, 0, imgW, imgH))
 
-	// 3. Resolve missing MCU blocks using smooth boundary-edge vertical interpolation
-	// + co-registered cross-channel detail transfer (applied when daytime detail is present)
+	// 3. Resolve MCU blocks per channel with smooth boundary-edge vertical interpolation
+	// Limited strictly to 1-2 scanlines (8-16px) of the same channel.
 	resolved := make([][3][196][64]uint8, numLines)
+	blockValid := make([][3][196]bool, numLines)
+
 	for rowIdx, key := range lineKeys {
 		sl := lineMap[key]
-		if sl == nil {
-			continue
-		}
 		for ch := 0; ch < 3; ch++ {
 			for colMCU := 0; colMCU < 196; colMCU++ {
-				if sl.valid[ch][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[ch][colMCU]
+				if sl != nil && sl.valid[ch][colMCU] {
+					blk := sl.blocks[ch][colMCU]
+					var sumBlk int
+					cnt255 := 0
+					cnt0 := 0
+					for p := 0; p < 64; p++ {
+						v := blk[p]
+						sumBlk += int(v)
+						if v >= 254 {
+							cnt255++
+						}
+						if v <= 1 {
+							cnt0++
+						}
+					}
+					meanBlk := sumBlk / 64
+
+					// All channels: Reject pure white saturated (255) DC-breakdown noise blocks
+					if meanBlk >= 252 || cnt255 >= 56 {
+						continue
+					}
+
+					// Thermal IR: Reject corrupted/near-zero noise floor blocks from fading
+					if ch == 2 && isThermalIR {
+						if meanBlk < 20 {
+							continue
+						}
+					}
+
+					// Daytime Vis/NIR: Reject fading DC stuck-at-zero noise blocks
+					if (ch == 0 || ch == 1) && dayFraction > 0.3 {
+						if meanBlk <= 2 || cnt0 >= 56 {
+							continue
+						}
+					}
+
+					resolved[rowIdx][ch][colMCU] = blk
+					blockValid[rowIdx][ch][colMCU] = true
 					continue
 				}
+
+				// Find closest valid lines above and below within max 2 scanlines (8-16px) of the SAME channel
 				upIdx, downIdx := -1, -1
-				for d := 1; d <= 5; d++ {
-					if upIdx < 0 && rowIdx-d >= 0 && key-lineKeys[rowIdx-d] <= 5 && lineMap[lineKeys[rowIdx-d]].valid[ch][colMCU] {
-						upIdx = rowIdx - d
+				for d := 1; d <= 2; d++ {
+					if upIdx < 0 && rowIdx-d >= 0 && key-lineKeys[rowIdx-d] <= 2 {
+						if prevSl := lineMap[lineKeys[rowIdx-d]]; prevSl != nil && prevSl.valid[ch][colMCU] {
+							upIdx = rowIdx - d
+						}
 					}
-					if downIdx < 0 && rowIdx+d < numLines && lineKeys[rowIdx+d]-key <= 5 && lineMap[lineKeys[rowIdx+d]].valid[ch][colMCU] {
-						downIdx = rowIdx + d
+					if downIdx < 0 && rowIdx+d < numLines && lineKeys[rowIdx+d]-key <= 2 {
+						if nextSl := lineMap[lineKeys[rowIdx+d]]; nextSl != nil && nextSl.valid[ch][colMCU] {
+							downIdx = rowIdx + d
+						}
 					}
 				}
-				var vInterp [64]float64
-				hasVInterp := false
+
+				// Only perform vertical interpolation when bounded on BOTH sides within 2 lines.
+				// One-sided continuous line-holding is eliminated to prevent vertical curtain noise.
 				if upIdx >= 0 && downIdx >= 0 {
 					bUp := lineMap[lineKeys[upIdx]].blocks[ch][colMCU]
 					bDown := lineMap[lineKeys[downIdx]].blocks[ch][colMCU]
@@ -1705,68 +2023,13 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 					for by := 0; by < 8; by++ {
 						alpha := float64((rowIdx-upIdx-1)*8+by+1) / totalSteps
 						for bx := 0; bx < 8; bx++ {
-							vInterp[by*8+bx] = (1.0-alpha)*float64(bUp[7*8+bx]) + alpha*float64(bDown[0*8+bx])
+							val := (1.0-alpha)*float64(bUp[7*8+bx]) + alpha*float64(bDown[0*8+bx])
+							resolved[rowIdx][ch][colMCU][by*8+bx] = uint8(math.Max(0, math.Min(255, math.Round(val))))
 						}
 					}
-					hasVInterp = true
-				} else if upIdx >= 0 {
-					bUp := lineMap[lineKeys[upIdx]].blocks[ch][colMCU]
-					for by := 0; by < 8; by++ {
-						for bx := 0; bx < 8; bx++ {
-							vInterp[by*8+bx] = float64(bUp[7*8+bx])
-						}
-					}
-					hasVInterp = true
-				} else if downIdx >= 0 {
-					bDown := lineMap[lineKeys[downIdx]].blocks[ch][colMCU]
-					for by := 0; by < 8; by++ {
-						for bx := 0; bx < 8; bx++ {
-							vInterp[by*8+bx] = float64(bDown[0*8+bx])
-						}
-					}
-					hasVInterp = true
+					blockValid[rowIdx][ch][colMCU] = true
 				}
-
-				// Cross-channel optical texture transfer (only when line is lit, w >= 0.5)
-				otherOpt := 1 - ch
-				if (ch == 0 || ch == 1) && w[rowIdx] >= 0.5 && sl.valid[otherOpt][colMCU] {
-					bOther := sl.blocks[otherOpt][colMCU]
-					var meanOther, meanSelf float64
-					for p := 0; p < 64; p++ {
-						meanOther += float64(bOther[p])
-						meanSelf += vInterp[p]
-					}
-					meanOther /= 64.0
-					meanSelf /= 64.0
-					scaleRatio := (pHigh[ch] - pLow[ch]) / (pHigh[otherOpt] - pLow[otherOpt] + 1e-6)
-					if !hasVInterp {
-						meanSelf = pLow[ch] + (meanOther-pLow[otherOpt])*scaleRatio
-					}
-					for p := 0; p < 64; p++ {
-						val := meanSelf + (float64(bOther[p])-meanOther)*scaleRatio
-						if val < 0 {
-							val = 0
-						} else if val > 255 {
-							val = 255
-						}
-						resolved[rowIdx][ch][colMCU][p] = uint8(math.Round(val))
-					}
-				} else if hasVInterp {
-					for p := 0; p < 64; p++ {
-						resolved[rowIdx][ch][colMCU][p] = uint8(math.Max(0, math.Min(255, math.Round(vInterp[p]))))
-					}
-				} else if sl.valid[0][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[0][colMCU]
-				} else if sl.valid[1][colMCU] {
-					resolved[rowIdx][ch][colMCU] = sl.blocks[1][colMCU]
-				} else if sl.valid[2][colMCU] {
-					bIR := sl.blocks[2][colMCU]
-					for p := 0; p < 64; p++ {
-						invIR := 1.0 - stretch(bIR[p], 2)
-						val := pLow[ch] + invIR*(pHigh[ch]-pLow[ch])
-						resolved[rowIdx][ch][colMCU][p] = uint8(math.Max(0, math.Min(255, math.Round(val))))
-					}
-				}
+				// Note: NO cross-channel fallback. Missing data remains unreceived (blockValid=false).
 			}
 		}
 	}
@@ -1777,9 +2040,12 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 	for rowIdx := 0; rowIdx < numLines; rowIdx++ {
 		weight := w[rowIdx]
 		for colMCU := 0; colMCU < 196; colMCU++ {
+			validA := blockValid[rowIdx][0][colMCU]
+			validB := blockValid[rowIdx][2][colMCU]
 			bVis := resolved[rowIdx][0][colMCU]
 			bNIR := resolved[rowIdx][1][colMCU]
 			bIR := resolved[rowIdx][2][colMCU]
+
 			for by := 0; by < 8; by++ {
 				y := rowIdx*8 + by
 				for bx := 0; bx < 8; bx++ {
@@ -1789,36 +2055,125 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 						dstX = imgW - 1 - x
 						dstY = imgH - 1 - y
 					}
+
 					p := by*8 + bx
-					vis := stretch(bVis[p], 0)
-					nir := stretch(bNIR[p], 1)
-					ir := stretch(bIR[p], 2)
 
 					// Chan A (Visible)
-					vA := uint8(math.Round(vis * 255.0))
-					// Chan B (Thermal IR: inverted so cold cloud tops appear white)
-					vB := uint8(math.Round((1.0 - ir) * 255.0))
-					chanAImg.SetRGBA(dstX, dstY, color.RGBA{R: vA, G: vA, B: vA, A: 255})
-					chanBImg.SetRGBA(dstX, dstY, color.RGBA{R: vB, G: vB, B: vB, A: 255})
-
-					// Daytime false-color RGB (MSU-MR 1-2-1 + ocean/cloud enhancement)
-					rDay := 0.80*nir + 0.20*vis
-					gDay := 0.60*nir + 0.40*vis
-					bDay := vis
-					if nir < 0.45 && vis < 0.45 {
-						waterFactor := (0.45 - nir) / 0.45
-						rDay *= 1.0 - 0.35*waterFactor
-						gDay = gDay*(1.0-0.15*waterFactor) + 0.06*waterFactor
-						bDay = bDay + 0.22*waterFactor
+					if validA {
+						vis := stretch(bVis[p], 0)
+						vA := uint8(math.Round(vis * 255.0))
+						chanAImg.SetRGBA(dstX, dstY, color.RGBA{R: vA, G: vA, B: vA, A: 255})
+					} else {
+						chanAImg.SetRGBA(dstX, dstY, color.RGBA{R: 0, G: 0, B: 0, A: 255})
 					}
 
-					// Nighttime thermal IR (inverted grayscale: cold clouds = white, warm sea = dark)
-					nightVal := 1.0 - ir
+					// Chan B (Thermal IR: inverted for cold high clouds, non-inverted for warm/reflective low clouds; Optical SWIR: non-inverted)
+					if validB {
+						var irDisplayVal float64
+						if isThermalIR {
+							ir := stretchIR(bIR[p], rowIdx)
+							invW := irInvertWeight[rowIdx]
+							irDisplayVal = invW*(1.0-ir) + (1.0-invW)*ir
+						} else {
+							ir := stretch(bIR[p], 2)
+							irDisplayVal = ir
+						}
+						vB := uint8(math.Round(irDisplayVal * 255.0))
+						chanBImg.SetRGBA(dstX, dstY, color.RGBA{R: vB, G: vB, B: vB, A: 255})
+					} else {
+						chanBImg.SetRGBA(dstX, dstY, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+					}
 
-					// Smooth blend between daytime false-color and nighttime thermal IR
-					rF := weight*rDay + (1.0-weight)*nightVal
-					gF := weight*gDay + (1.0-weight)*nightVal
-					bF := weight*bDay + (1.0-weight)*nightVal
+					// Full composite image:
+					// Check per-channel validity at this MCU block
+					validVis := validA
+					validNIR := blockValid[rowIdx][1][colMCU]
+					validIR := validB
+
+					// If all channels are invalid, output black background
+					if !validVis && !validNIR && !validIR {
+						fullImg.SetRGBA(dstX, dstY, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+						continue
+					}
+
+					// Suppress isolated single-channel fragments floating near black unreceived gaps
+					if dayFraction > 0.3 && (validVis != validNIR) {
+						activeCh := 0
+						if validNIR {
+							activeCh = 1
+						}
+						hasAbove := rowIdx > 0 && blockValid[rowIdx-1][activeCh][colMCU]
+						hasBelow := rowIdx < numLines-1 && blockValid[rowIdx+1][activeCh][colMCU]
+						if !hasAbove && !hasBelow {
+							fullImg.SetRGBA(dstX, dstY, color.RGBA{R: 0, G: 0, B: 0, A: 255})
+							continue
+						}
+					}
+
+					// 1. Daytime false-color RGB calculation with robust grayscale fallback
+					var rDay, gDay, bDay float64
+					hasDay := validVis || validNIR
+					if validVis && validNIR {
+						vis := stretch(bVis[p], 0)
+						nir := stretch(bNIR[p], 1)
+						rDay = 0.80*nir + 0.20*vis
+						gDay = 0.60*nir + 0.40*vis
+						bDay = vis
+						if nir < 0.45 && vis < 0.45 {
+							waterFactor := (0.45 - nir) / 0.45
+							rDay *= 1.0 - 0.35*waterFactor
+							gDay = gDay*(1.0-0.15*waterFactor) + 0.06*waterFactor
+							bDay = bDay + 0.22*waterFactor
+						}
+					} else if validVis && !validNIR {
+						// Fallback: NIR missing, duplicate Vis as neutral grayscale (prevents pure blue/cyan bars)
+						vis := stretch(bVis[p], 0)
+						rDay, gDay, bDay = vis, vis, vis
+					} else if !validVis && validNIR {
+						// Fallback: Vis missing, duplicate NIR as neutral grayscale (prevents pure red/yellow bars)
+						nir := stretch(bNIR[p], 1)
+						rDay, gDay, bDay = nir, nir, nir
+					} else if validIR {
+						// Daytime slot has no optical data, fallback to IR luminance
+						var irLum float64
+						if isThermalIR {
+							ir := stretchIR(bIR[p], rowIdx)
+							invW := irInvertWeight[rowIdx]
+							irLum = invW*(1.0-ir) + (1.0-invW)*ir
+						} else {
+							irLum = stretch(bIR[p], 2)
+						}
+						rDay, gDay, bDay = irLum, irLum, irLum
+					}
+
+					// 2. Nighttime value calculation
+					var nightVal float64
+					hasNight := validIR
+					if validIR {
+						if isThermalIR {
+							ir := stretchIR(bIR[p], rowIdx)
+							invW := irInvertWeight[rowIdx]
+							nightVal = invW*(1.0-ir) + (1.0-invW)*ir
+						} else {
+							ir := stretch(bIR[p], 2)
+							nightVal = ir * 0.5
+						}
+					} else if hasDay {
+						// Nighttime slot has no IR, fallback to optical luminance
+						nightVal = (rDay + gDay + bDay) / 3.0
+					}
+
+					// 3. Smooth blend between daytime and nighttime
+					var rF, gF, bF float64
+					if hasDay && hasNight {
+						rF = weight*rDay + (1.0-weight)*nightVal
+						gF = weight*gDay + (1.0-weight)*nightVal
+						bF = weight*bDay + (1.0-weight)*nightVal
+					} else if hasDay {
+						rF, gF, bF = rDay, gDay, bDay
+					} else {
+						rF, gF, bF = nightVal, nightVal, nightVal
+					}
 
 					r8 := uint8(math.Max(0, math.Min(255, math.Round(rF*255.0))))
 					g8 := uint8(math.Max(0, math.Min(255, math.Round(gF*255.0))))
@@ -1830,4 +2185,55 @@ func renderLRPTImages(lineMap map[int]*lrptScanLine, lineKeys []int, minMs uint3
 	}
 
 	return fullImg, chanAImg, chanBImg, dayFraction
+}
+
+// RectifyLRPTTangential corrects the Earth-curvature tangential scanner distortion
+// caused by the constant angular velocity of the MSU-MR mirror.
+func RectifyLRPTTangential(src *image.RGBA) *image.RGBA {
+	if src == nil {
+		return nil
+	}
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return src
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+
+	// MSU-MR maximum scan angle is approx 55.4 degrees (0.9669 rad)
+	const maxAngle = 0.9669
+	maxTan := math.Tan(maxAngle)
+
+	cx := float64(w-1) / 2.0
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			// Linear ground distance normalized to [-1, 1]
+			normX := (float64(x) - cx) / cx
+			// Inverse mapping: find scanner angle theta corresponding to ground position
+			theta := math.Atan(normX * maxTan)
+			srcNormX := theta / maxAngle
+			srcX := cx + srcNormX*cx
+
+			x0 := int(math.Floor(srcX))
+			x1 := x0 + 1
+			alpha := srcX - float64(x0)
+
+			if x0 < 0 {
+				x0 = 0
+			}
+			if x1 >= w {
+				x1 = w - 1
+			}
+			c0 := src.RGBAAt(x0, y)
+			c1 := src.RGBAAt(x1, y)
+
+			r := uint8(float64(c0.R)*(1.0-alpha) + float64(c1.R)*alpha + 0.5)
+			g := uint8(float64(c0.G)*(1.0-alpha) + float64(c1.G)*alpha + 0.5)
+			b := uint8(float64(c0.B)*(1.0-alpha) + float64(c1.B)*alpha + 0.5)
+			a := uint8(float64(c0.A)*(1.0-alpha) + float64(c1.A)*alpha + 0.5)
+
+			dst.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: a})
+		}
+	}
+	return dst
 }

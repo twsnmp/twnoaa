@@ -958,7 +958,7 @@
                     src={currentImageBase64}
                     alt="APT Satellite Capture"
                     style="image-rendering: pixelated;"
-                    class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full h-[360px] object-fill' : 'max-h-[460px] object-contain'}"
+                    class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full max-h-[70vh] object-contain' : 'max-h-[460px] object-contain'}"
                   />
                 </button>
               {:else}
