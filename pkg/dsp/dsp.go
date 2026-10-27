@@ -310,19 +310,30 @@ func CalculateSignalAndNoise(buf []byte) (signalDBFS, noiseDBFS, snrDB float64) 
 	}
 
 	numSamples := len(buf) / 2
+
+	// Calculate and remove hardware DC offset
+	var sumR, sumIm float64
+	for i := 0; i < numSamples; i++ {
+		sumR += (float64(buf[2*i]) - 127.5) / 127.5
+		sumIm += (float64(buf[2*i+1]) - 127.5) / 127.5
+	}
+	meanR := sumR / float64(numSamples)
+	meanIm := sumIm / float64(numSamples)
+
 	blocks := numSamples / numBins
-	if blocks > 8 {
-		blocks = 8
+	if blocks > 32 {
+		blocks = 32
 	}
 
 	avgPower := make([]float64, numBins)
+	half := numBins / 2
 
 	for b := 0; b < blocks; b++ {
 		fftInput := make([]complex128, numBins)
 		for i := 0; i < numBins; i++ {
 			idx := b*numBins + i
-			r := (float64(buf[2*idx]) - 127.5) / 127.5
-			im := (float64(buf[2*idx+1]) - 127.5) / 127.5
+			r := (float64(buf[2*idx])-127.5)/127.5 - meanR
+			im := (float64(buf[2*idx+1])-127.5)/127.5 - meanIm
 			w := 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(i)/float64(numBins-1)))
 			fftInput[i] = complex(r*w, im*w)
 		}
@@ -330,29 +341,35 @@ func CalculateSignalAndNoise(buf []byte) (signalDBFS, noiseDBFS, snrDB float64) 
 		fftOut := fft(fftInput)
 
 		for i := 0; i < numBins; i++ {
-			p := cmplx.Abs(fftOut[i])
-			pDb := 10 * math.Log10(p*p + 1e-12)
-			avgPower[i] += pDb
+			shifted := (i + half) % numBins
+			p := cmplx.Abs(fftOut[shifted]) / float64(numBins)
+			avgPower[i] += p * p
 		}
 	}
 
-	powers := make([]float64, numBins)
+	powersDB := make([]float64, numBins)
 	for i := 0; i < numBins; i++ {
-		powers[i] = avgPower[i] / float64(blocks)
+		linP := avgPower[i] / float64(blocks)
+		powersDB[i] = 10 * math.Log10(linP + 1e-15)
 	}
 
-	centerBin := numBins / 2
-	if centerBin > 0 && centerBin < numBins-1 {
-		powers[centerBin] = (powers[centerBin-1] + powers[centerBin+1]) / 2.0
+	// Interpolate center DC spike (center = numBins/2)
+	if half > 0 && half < numBins-1 {
+		powersDB[half] = (powersDB[half-1] + powersDB[half+1]) / 2.0
 	}
 
-	sort.Float64s(powers)
+	// Sort all bins to determine signal and noise levels robustly
+	sorted := make([]float64, numBins)
+	copy(sorted, powersDB)
+	sort.Float64s(sorted)
 
-	noiseIdx := numBins / 5
-	noiseDBFS = powers[noiseIdx]
+	// Noise floor: 25th percentile of spectrum bins
+	noiseIdx := numBins / 4
+	noiseDBFS = sorted[noiseIdx]
 
+	// Signal peak: 95th percentile
 	signalIdx := numBins * 95 / 100
-	signalDBFS = powers[signalIdx]
+	signalDBFS = sorted[signalIdx]
 
 	snrDB = signalDBFS - noiseDBFS
 	if snrDB < 0 {

@@ -45,7 +45,7 @@
       const mid = Math.floor(snrs.length / 2)
       const medianSNR = snrs.length === 0 ? 0 : (snrs.length % 2 !== 0 ? snrs[mid] : (snrs[mid - 1] + snrs[mid]) / 2)
 
-      const goodCount = history.filter(p => p.snr >= 10.0).length
+      const goodCount = history.filter(p => p.snr >= 7.0).length
       const ratio = history.length > 0 ? (goodCount / history.length) * 100 : 0
 
       const firstTime = history[0]?.time_sec ?? 0
@@ -112,7 +112,7 @@
     const isSignal = activeMetric === 'signal'
     const isNoise = activeMetric === 'noise'
 
-    const snrAxisMax = maxSnrGlobal > 25 ? Math.ceil(maxSnrGlobal / 5) * 5 : 25
+    const snrAxisMax = maxSnrGlobal > 15 ? Math.ceil(maxSnrGlobal / 5) * 5 : 15
 
     const series = recordsWithData.map((rec, idx) => {
       const color = COLOR_PALETTE[idx % COLOR_PALETTE.length]

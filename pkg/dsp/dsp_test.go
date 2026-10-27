@@ -199,5 +199,35 @@ func TestAnalyzeRawIQSpectrumAndWAVSpectrum(t *testing.T) {
 	}
 }
 
+func TestCalculateSignalAndNoise(t *testing.T) {
+	// 1. Buffer too small
+	sig, noise, snr := CalculateSignalAndNoise([]byte{128, 128})
+	if sig != -100 || noise != -100 || snr != 0 {
+		t.Errorf("Expected fallback for small buffer, got sig=%.1f, noise=%.1f, snr=%.1f", sig, noise, snr)
+	}
+
+	// 2. Synthesize test IQ buffer with known signal + DC offset
+	bufSize := 1024 * 16
+	buf := make([]byte, bufSize)
+	for i := 0; i < bufSize/2; i++ {
+		// Carrier at bin 20
+		angle := float64(i) * 2.0 * math.Pi * 20.0 / 128.0
+		// Signal amplitude 0.4 on top of DC offset 0.3
+		valI := 0.4*math.Cos(angle) + 0.3
+		valQ := 0.4*math.Sin(angle) + 0.3
+		buf[2*i] = byte(math.Max(0, math.Min(255, (valI+1.0)*127.5)))
+		buf[2*i+1] = byte(math.Max(0, math.Min(255, (valQ+1.0)*127.5)))
+	}
+
+	sig, noise, snr = CalculateSignalAndNoise(buf)
+	if snr <= 0 {
+		t.Errorf("Expected positive SNR for signal carrier, got %.2f dB", snr)
+	}
+	if sig <= noise {
+		t.Errorf("Expected signal power > noise power, got sig=%.2f, noise=%.2f", sig, noise)
+	}
+}
+
+
 
 

@@ -172,26 +172,58 @@
     }
 
     const history = rec.signal_history || []
+    const hasImagery = Boolean(rec.image_path || rec.channel_a)
+    const isSpectrogramOnly = rec.decode_mode === 'lrpt_spectrogram'
+    const isLrptSuccess = rec.decode_mode === 'lrpt' && hasImagery
+    const isAptSuccess = rec.decode_mode !== 'lrpt_spectrogram' && rec.decode_mode !== 'lrpt' && hasImagery
+
     if (history.length > 0) {
       // 1. Median SNR
       const snrs = history.map(p => p.snr).sort((a, b) => a - b)
       const mid = Math.floor(snrs.length / 2)
       const medianSNR = snrs.length % 2 !== 0 ? snrs[mid] : (snrs[mid - 1] + snrs[mid]) / 2
 
-      // 2. Good duration (SNR >= 10dB)
-      const goodCount = history.filter(p => p.snr >= 10.0).length
-      const goodRatio = (goodCount / history.length) * 100
+      // 2. Valid signal duration (SNR >= 7.0dB)
+      const validCount = history.filter(p => p.snr >= 7.0).length
+      const validRatio = (validCount / history.length) * 100
 
       // 3. Top 10% SNR
       const snrsDesc = [...snrs].reverse()
       const topCount = Math.max(1, Math.ceil(snrsDesc.length * 0.1))
       const top10SNR = snrsDesc.slice(0, topCount).reduce((a, b) => a + b, 0) / topCount
+      const maxSNR = snrsDesc[0]
 
-      const goodPercent = `${goodRatio.toFixed(0)}%`
-      const detailText = `SNR +${medianSNR.toFixed(1)}dB (${i18n.t('gallery.goodDuration').split(' ')[0]} ${goodPercent})`
+      const validPercent = `${validRatio.toFixed(0)}%`
+      const detailText = `SNR +${medianSNR.toFixed(1)}dB (${i18n.t('gallery.goodDuration').split(' ')[0]} ${validPercent})`
 
-      // 良好 (Excellent): 良好受信時間が40%以上 かつ 中央値SNR 8dB以上
-      if (goodRatio >= 40 && medianSNR >= 8.0) {
+      // スペクトログラムのみ (パケット復号失敗パス) の場合: 最高でも「可」、信号が微弱なら「弱」
+      if (isSpectrogramOnly) {
+        if (maxSNR >= 8.0 || validRatio >= 5.0) {
+          return {
+            level: 'fair',
+            label: i18n.t('gallery.signalFair'),
+            badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+            bars: 2,
+            barBg: 'bg-amber-400',
+            rssiText: detailText,
+            detailText
+          }
+        }
+        return {
+          level: 'weak',
+          label: i18n.t('gallery.signalWeak'),
+          badgeClass: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+          bars: 1,
+          barBg: 'bg-rose-400',
+          rssiText: detailText,
+          detailText
+        }
+      }
+
+      // 良好 (Excellent / 4本バー):
+      // 画像再生成功かつ十分な品質 (上位10% >= 7.5dB または 有効時間 >= 15% または 中央値 >= 6.4dB)
+      // または (画像情報未記録でも) 有効時間 >= 25% または 中央値 >= 6.6dB
+      if ((isLrptSuccess || isAptSuccess) && (top10SNR >= 7.5 || validRatio >= 15.0 || medianSNR >= 6.4)) {
         return {
           level: 'excellent',
           label: i18n.t('gallery.signalExcellent'),
@@ -201,8 +233,19 @@
           rssiText: detailText,
           detailText
         }
-      // 普通 (Good): 良好受信時間が20%以上
-      } else if (goodRatio >= 20) {
+      } else if (validRatio >= 25.0 || medianSNR >= 6.6) {
+        return {
+          level: 'excellent',
+          label: i18n.t('gallery.signalExcellent'),
+          badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+          bars: 4,
+          barBg: 'bg-emerald-400',
+          rssiText: detailText,
+          detailText
+        }
+      // 普通 (Good / 3本バー):
+      // 画像再生に成功している、または 有効時間 >= 10%、または 中央値 >= 6.1dB
+      } else if (isLrptSuccess || isAptSuccess) {
         return {
           level: 'good',
           label: i18n.t('gallery.signalGood'),
@@ -212,8 +255,19 @@
           rssiText: detailText,
           detailText
         }
-      // 可 (Fair): 良好受信時間が10%以上 (1分以上の有効受信があり一部画像が見える)
-      } else if (goodRatio >= 10) {
+      } else if (validRatio >= 10.0 || medianSNR >= 6.1) {
+        return {
+          level: 'good',
+          label: i18n.t('gallery.signalGood'),
+          badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+          bars: 3,
+          barBg: 'bg-cyan-400',
+          rssiText: detailText,
+          detailText
+        }
+      // 可 (Fair / 2本バー):
+      // 搬送波・信号検出あり
+      } else if (maxSNR >= 7.0 || medianSNR >= 5.8) {
         return {
           level: 'fair',
           label: i18n.t('gallery.signalFair'),
@@ -223,7 +277,7 @@
           rssiText: detailText,
           detailText
         }
-      // 弱 (Weak): 良好受信時間が10%未満 (ほぼ全編砂嵐・復調不可)
+      // 弱 (Weak / 1本バー):
       } else {
         return {
           level: 'weak',
@@ -252,9 +306,9 @@
 
     const rssi = rec.avg_rssi
     const peak = rec.peak_rssi
-    const rssiText = peak ? `${rssi.toFixed(1)} dBFS (Peak ${peak.toFixed(1)})` : `${rssi.toFixed(1)} dBFS`
+    const rssiText = (peak && peak > -99) ? `${rssi.toFixed(1)} dBFS (Peak ${peak.toFixed(1)})` : `${rssi.toFixed(1)} dBFS`
 
-    if (rssi >= -20 && peak >= -12) {
+    if (rssi >= -32 || (peak && peak >= -20)) {
       return {
         level: 'excellent',
         label: i18n.t('gallery.signalExcellent'),
@@ -264,7 +318,7 @@
         rssiText,
         detailText: rssiText
       }
-    } else if (rssi >= -28) {
+    } else if (rssi >= -36 || (peak && peak >= -25)) {
       return {
         level: 'good',
         label: i18n.t('gallery.signalGood'),
@@ -274,7 +328,7 @@
         rssiText,
         detailText: rssiText
       }
-    } else if (rssi >= -36) {
+    } else if (rssi >= -40 || (peak && peak >= -30)) {
       return {
         level: 'fair',
         label: i18n.t('gallery.signalFair'),

@@ -35,7 +35,7 @@
     const snrData = signalHistory.map(p => p.snr)
 
     const maxRecordedSnr = snrData.length > 0 ? Math.max(...snrData) : 0
-    const snrAxisMax = maxRecordedSnr > 25 ? Math.ceil(maxRecordedSnr / 5) * 5 : 25
+    const snrAxisMax = maxRecordedSnr > 15 ? Math.ceil(maxRecordedSnr / 5) * 5 : 15
 
     const option = {
       backgroundColor: 'transparent',
@@ -150,7 +150,7 @@
             symbol: 'none',
             data: [
               {
-                yAxis: 10,
+                yAxis: 7,
                 lineStyle: {
                   color: 'rgba(16, 185, 129, 0.65)',
                   type: 'dashed',
@@ -159,7 +159,7 @@
                 label: {
                   show: true,
                   position: 'insideEndTop',
-                  formatter: '10 dB (Lock)',
+                  formatter: '7 dB (Lock)',
                   color: '#10b981',
                   fontSize: 10
                 }
@@ -210,7 +210,7 @@
     if (!signalHistory || signalHistory.length === 0) {
       return { count: 0, ratio: 0, durationSec: 0 }
     }
-    const goodCount = signalHistory.filter(p => p.snr >= 10.0).length
+    const goodCount = signalHistory.filter(p => p.snr >= 7.0).length
     const ratio = (goodCount / signalHistory.length) * 100
 
     // Compute actual duration in seconds using time_sec
