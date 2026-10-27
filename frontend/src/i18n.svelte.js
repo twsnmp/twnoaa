@@ -1,12 +1,12 @@
 const translations = {
   en: {
     title: "twnoaa Satellite Station",
-    subtitle: "NOAA Weather Satellite Receiver & AI Engine",
+    subtitle: "Weather Satellite Receiver & AI Engine",
     tabs: {
-      tracker: "Pass Tracker",
-      globe: "3D Orbit",
-      sdr: "SDR Receiver",
-      gallery: "APT Gallery",
+      tracker: "Tracker",
+      globe: "Orbit",
+      sdr: "Receiver",
+      gallery: "APT Image",
       ai: "AI Analysis",
       settings: "Settings"
     },
@@ -268,14 +268,14 @@ const translations = {
   },
   ja: {
     title: "twnoaa 気象衛星受信ステーション",
-    subtitle: "NOAA 気象衛星受信機 ＆ AI エンジン",
+    subtitle: "気象衛星受信機 ＆ AI エンジン",
     tabs: {
-      tracker: "衛星追跡・パス予測",
-      globe: "3D衛星軌道",
-      sdr: "SDR受信用・DSP",
-      gallery: "APT画像ギャラリー",
-      ai: "AI気象解析",
-      settings: "システム設定"
+      tracker: "衛星追跡",
+      globe: "衛星軌道",
+      sdr: "受信テスト",
+      gallery: "APT画像",
+      ai: "AI解析",
+      settings: "設定"
     },
     globe: {
       title: "3D 衛星軌道モニタ",
@@ -381,10 +381,10 @@ const translations = {
       deleteRawIQConfirm: "このパスのRaw IQ生データ（.iq）を削除しますか？\n※復調済み画像、音声、シグナル履歴は保持されます。",
       batchDelete: "一括削除",
       batchDeleteConfirm: "選択した{count}件の受信履歴と関連画像ファイルを削除しますか？",
-      batchDeleteBtn: "チェックした項目を削除 ({count})",
+      batchDeleteBtn: "選択を削除 ({count})",
       batchDeleteRawIQ: "生データのみ一括削除",
       batchDeleteRawIQConfirm: "選択した{count}件のパスからRaw IQ生データのみを削除しますか？\n※画像、音声、受信履歴は保持されます。",
-      batchDeleteRawIQBtn: "生データのみ削除 ({count})",
+      batchDeleteRawIQBtn: "生データ削除 ({count})",
       rawIQBadge: "RAW IQ",
       spectrogramBadge: "LRPT同期なし (RFスペクトラム)",
       spectrogramBadgeShort: "電波",

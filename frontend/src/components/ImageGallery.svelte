@@ -1,7 +1,7 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload, Music, Volume2, PlayCircle, Layers, CheckSquare, Square, Filter } from '@lucide/svelte'
+  import { Image, Bot, Sparkles, Trash2, AlertTriangle, X, Radio, Activity, Upload, Music, Volume2, PlayCircle, Layers, CheckSquare, Square, Filter, ZoomIn, ZoomOut, RotateCcw, Maximize2 } from '@lucide/svelte'
   import SignalChart from './SignalChart.svelte'
   import MultiSignalChart from './MultiSignalChart.svelte'
   import AudioPlayer from './AudioPlayer.svelte'
@@ -20,6 +20,190 @@
   let showBatchRawIQDeleteModal = $state(false)
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
+  let zoomScale = $state(1)
+  let zoomContainerRef = $state(null)
+  let imgNaturalWidth = $state(2080)
+  let imgNaturalHeight = $state(1000)
+  let isPanning = $state(false)
+  let panStartX = $state(0)
+  let panStartY = $state(0)
+  let scrollStartX = $state(0)
+  let scrollStartY = $state(0)
+
+  let displayedWidth = $derived(
+    Math.max(160, Math.round((imgNaturalWidth || 2080) * zoomScale))
+  )
+
+  function openZoomModal() {
+    showZoomModal = true
+    isPanning = false
+    setTimeout(() => {
+      handleZoomFit()
+    }, 50)
+  }
+
+  function closeZoomModal() {
+    showZoomModal = false
+    zoomScale = 1
+    isPanning = false
+  }
+
+  function handleImageLoad(e) {
+    if (e?.currentTarget) {
+      imgNaturalWidth = e.currentTarget.naturalWidth || 2080
+      imgNaturalHeight = e.currentTarget.naturalHeight || 1000
+    }
+    handleZoomFit()
+  }
+
+  async function applyZoom(targetScale, pivotX = null, pivotY = null) {
+    if (!zoomContainerRef) return
+    const clampedScale = Math.min(Math.max(targetScale, 0.05), 5.0)
+    if (Math.abs(clampedScale - zoomScale) < 0.001) return
+
+    const container = zoomContainerRef
+    const cW = container.clientWidth
+    const cH = container.clientHeight
+    if (cW <= 0 || cH <= 0) return
+
+    // ピボット座標（指定がなければコンテナの中央）
+    const px = pivotX !== null ? pivotX : cW / 2
+    const py = pivotY !== null ? pivotY : cH / 2
+
+    const natW = imgNaturalWidth || 2080
+    const natH = imgNaturalHeight || (natW * 0.8)
+
+    const oldW = Math.max(160, Math.round(natW * zoomScale))
+    const oldH = Math.max(100, Math.round(natH * zoomScale))
+
+    // 現在のコンテナ内における画像の中央配置マージン（画像がコンテナより小さいとき）
+    const marginX = oldW < cW ? (cW - oldW) / 2 : 0
+    const marginY = oldH < cH ? (cH - oldH) / 2 : 0
+
+    // 画像上のピボット座標
+    const imgX = (container.scrollLeft + px) - marginX
+    const imgY = (container.scrollTop + py) - marginY
+
+    // 比率 u, v (0.0 〜 1.0)
+    const u = Math.min(Math.max(imgX / oldW, 0), 1)
+    const v = Math.min(Math.max(imgY / oldH, 0), 1)
+
+    // スケールを更新
+    zoomScale = Math.round(clampedScale * 100) / 100
+
+    await tick()
+
+    const newW = Math.max(160, Math.round(natW * zoomScale))
+    const newH = Math.max(100, Math.round(natH * zoomScale))
+
+    const newMarginX = newW < cW ? (cW - newW) / 2 : 0
+    const newMarginY = newH < cH ? (cH - newH) / 2 : 0
+
+    const targetScrollX = (u * newW + newMarginX) - px
+    const targetScrollY = (v * newH + newMarginY) - py
+
+    container.scrollLeft = Math.max(0, targetScrollX)
+    container.scrollTop = Math.max(0, targetScrollY)
+  }
+
+  function handleZoomIn() {
+    let next
+    if (zoomScale < 1) {
+      next = zoomScale + 0.1
+    } else if (zoomScale < 2) {
+      next = zoomScale + 0.25
+    } else {
+      next = zoomScale + 0.5
+    }
+    applyZoom(next)
+  }
+
+  function handleZoomOut() {
+    let next
+    if (zoomScale > 2) {
+      next = zoomScale - 0.5
+    } else if (zoomScale > 1) {
+      next = zoomScale - 0.25
+    } else {
+      next = zoomScale - 0.1
+    }
+    applyZoom(next)
+  }
+
+  function handleZoomReset() {
+    applyZoom(1.0)
+  }
+
+  function handleZoomFit() {
+    if (!zoomContainerRef) return
+    const containerW = zoomContainerRef.clientWidth - 48
+    const containerH = zoomContainerRef.clientHeight - 48
+    if (containerW <= 0 || containerH <= 0) return
+
+    const natW = imgNaturalWidth || 2080
+    const natH = imgNaturalHeight || (natW * 0.8)
+
+    const scaleW = containerW / natW
+    const scaleH = containerH / natH
+    const fitScale = Math.min(scaleW, scaleH)
+
+    zoomScale = Math.max(Math.round(fitScale * 100) / 100, 0.05)
+    if (zoomContainerRef) {
+      zoomContainerRef.scrollLeft = 0
+      zoomContainerRef.scrollTop = 0
+    }
+  }
+
+  function handleZoomWheel(e) {
+    e.preventDefault()
+    if (!zoomContainerRef) return
+    const rect = zoomContainerRef.getBoundingClientRect()
+    const px = e.clientX - rect.left
+    const py = e.clientY - rect.top
+
+    const factor = e.deltaY < 0 ? 1.15 : 0.87
+    const next = zoomScale * factor
+    applyZoom(next, px, py)
+  }
+
+  function handlePanStart(e) {
+    if (e.button !== 0) return
+    isPanning = true
+    panStartX = e.clientX
+    panStartY = e.clientY
+    if (zoomContainerRef) {
+      scrollStartX = zoomContainerRef.scrollLeft
+      scrollStartY = zoomContainerRef.scrollTop
+    }
+  }
+
+  function handlePanMove(e) {
+    if (!isPanning || !zoomContainerRef) return
+    e.preventDefault()
+    const dx = e.clientX - panStartX
+    const dy = e.clientY - panStartY
+    zoomContainerRef.scrollLeft = scrollStartX - dx
+    zoomContainerRef.scrollTop = scrollStartY - dy
+  }
+
+  function handlePanEnd() {
+    isPanning = false
+  }
+
+  function handleToggleZoom(e) {
+    if (zoomScale > 1.2) {
+      handleZoomFit()
+    } else {
+      let px = null
+      let py = null
+      if (zoomContainerRef && e) {
+        const rect = zoomContainerRef.getBoundingClientRect()
+        px = e.clientX - rect.left
+        py = e.clientY - rect.top
+      }
+      applyZoom(2.0, px, py)
+    }
+  }
   let detailViewTab = $state('image') // 'image' | 'signal' | 'compare' | 'audio' | 'spectrum'
   let decodingWav = $state(false)
   let wavStatusMsg = $state('')
@@ -734,12 +918,9 @@
         <!-- Batch Actions Bar when items are selected -->
         {#if selectedRecordIds.length > 0}
           <div class="flex items-center justify-between bg-red-950/25 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs transition-all">
-            <div class="flex items-center gap-2">
-              <span class="inline-flex items-center justify-center px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-300 font-mono text-[11px] font-bold border border-red-500/30">
+            <div class="flex items-center gap-1.5">
+              <span class="inline-flex items-center justify-center px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-300 font-mono text-[11px] font-bold border border-red-500/30" title="Selected Count">
                 {selectedRecordIds.length}
-              </span>
-              <span class="text-[11px] font-medium text-slate-200">
-                {i18n.t('gallery.selectedCount', { count: selectedRecordIds.length })}
               </span>
             </div>
 
@@ -1000,23 +1181,27 @@
           </div>
 
           {#if detailViewTab === 'image'}
-            <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[360px] flex items-center justify-center p-4">
+            <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[220px] flex items-center justify-center p-3">
               {#if currentImageBase64}
                 <button
                   type="button"
-                  onclick={() => showZoomModal = true}
-                  class="w-full flex items-center justify-center group focus:outline-none cursor-zoom-in"
+                  onclick={openZoomModal}
+                  class="w-full flex items-center justify-center group focus:outline-none cursor-zoom-in relative"
                   title={i18n.t('gallery.clickToZoom')}
                 >
                   <img
                     src={currentImageBase64}
                     alt="APT Satellite Capture"
                     style="image-rendering: pixelated;"
-                    class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full max-h-[70vh] object-contain' : 'max-h-[460px] object-contain'}"
+                    class="rounded-lg shadow-xl transition-all {viewMode === 'stretch' ? 'w-full max-h-[280px] object-contain' : 'max-h-[250px] object-contain'}"
                   />
+                  <div class="absolute bottom-2 right-2 px-2 py-0.5 rounded-lg bg-slate-950/80 border border-slate-700/60 text-[10px] text-slate-300 flex items-center gap-1.5 opacity-70 group-hover:opacity-100 transition-opacity backdrop-blur-xs pointer-events-none">
+                    <ZoomIn class="w-3 h-3 text-cyan-400" />
+                    <span>{i18n.t('gallery.clickToZoom')}</span>
+                  </div>
                 </button>
               {:else}
-                <div class="text-center py-12 px-6 space-y-3">
+                <div class="text-center py-10 px-6 space-y-3">
                   <AlertTriangle class="w-10 h-10 text-amber-500/80 mx-auto" />
                   <p class="text-xs text-slate-300 font-medium max-w-sm">
                     {i18n.t('gallery.imageNotFound')}
@@ -1117,24 +1302,111 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => { if (showZoomModal && e.key === 'Escape') closeZoomModal() }} />
+
 <!-- Image Zoom Modal -->
 {#if showZoomModal && currentImageBase64}
-  <div class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6">
-    <div class="absolute top-4 right-4 flex items-center gap-3">
+  <div class="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col overflow-hidden select-none">
+    <!-- Modal Header Toolbar -->
+    <div class="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-slate-900/90 border-b border-slate-800 shadow-md z-10">
+      <div class="flex items-center gap-3">
+        <div class="p-1.5 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-cyan-400">
+          <Image class="w-4 h-4" />
+        </div>
+        <div>
+          <h4 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+            {selectedRecord?.sat_name}
+            <span class="text-xs font-mono text-cyan-400 font-normal">({(selectedRecord?.frequency / 1e6).toFixed(4)} MHz)</span>
+          </h4>
+          <p class="text-[11px] text-slate-400 flex flex-wrap items-center gap-2">
+            <span>{new Date(selectedRecord?.timestamp).toLocaleString()}</span>
+            <span>•</span>
+            <span class="text-slate-400">ホイール: ズーム / ドラッグ: 移動 / ダブルクリック: 拡大</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Zoom Controls -->
+      <div class="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 p-1 rounded-xl">
+        <button
+          type="button"
+          onclick={handleZoomOut}
+          disabled={zoomScale <= 0.05}
+          class="p-1.5 hover:bg-slate-800 disabled:opacity-30 text-slate-300 hover:text-white rounded-lg transition-all cursor-pointer"
+          title="ズームアウト (縮小)"
+        >
+          <ZoomOut class="w-4 h-4" />
+        </button>
+
+        <span class="px-2 py-0.5 text-xs font-mono font-bold text-cyan-300 min-w-[58px] text-center">
+          {Math.round(zoomScale * 100)}%
+        </span>
+
+        <button
+          type="button"
+          onclick={handleZoomIn}
+          disabled={zoomScale >= 5}
+          class="p-1.5 hover:bg-slate-800 disabled:opacity-30 text-slate-300 hover:text-white rounded-lg transition-all cursor-pointer"
+          title="ズームイン (拡大・最大5倍)"
+        >
+          <ZoomIn class="w-4 h-4" />
+        </button>
+
+        <div class="h-4 w-px bg-slate-800 mx-1"></div>
+
+        <button
+          type="button"
+          onclick={handleZoomFit}
+          class="px-2.5 py-1 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+          title="画面に合わせる"
+        >
+          Fit
+        </button>
+
+        <button
+          type="button"
+          onclick={handleZoomReset}
+          class="px-2.5 py-1 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-semibold rounded-lg transition-all cursor-pointer flex items-center gap-1"
+          title="原寸 100%"
+        >
+          <RotateCcw class="w-3 h-3" />
+          100%
+        </button>
+      </div>
+
+      <!-- Close Button -->
       <button
-        onclick={() => showZoomModal = false}
-        class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition-all"
+        type="button"
+        onclick={closeZoomModal}
+        class="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-all cursor-pointer"
+        title="閉じる (Esc)"
       >
         <X class="w-5 h-5" />
       </button>
     </div>
-    <div class="max-w-5xl w-full max-h-[85vh] overflow-auto p-2 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center">
-      <img
-        src={currentImageBase64}
-        alt="APT Satellite Capture Full Zoom"
-        style="image-rendering: pixelated;"
-        class="w-full object-contain rounded-xl"
-      />
+
+    <!-- Zoom & Scroll Viewport -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      bind:this={zoomContainerRef}
+      onwheel={handleZoomWheel}
+      onmousedown={handlePanStart}
+      onmousemove={handlePanMove}
+      onmouseup={handlePanEnd}
+      onmouseleave={handlePanEnd}
+      ondblclick={handleToggleZoom}
+      class="flex-1 w-full overflow-auto p-4 flex {isPanning ? 'cursor-grabbing' : 'cursor-grab'} select-none"
+    >
+      <div class="m-auto flex items-center justify-center">
+        <img
+          onload={handleImageLoad}
+          src={currentImageBase64}
+          alt="APT Satellite Capture Full Zoom"
+          draggable="false"
+          style="image-rendering: pixelated; width: {displayedWidth}px; max-width: none; height: auto;"
+          class="rounded-xl shadow-2xl pointer-events-none"
+        />
+      </div>
     </div>
   </div>
 {/if}
