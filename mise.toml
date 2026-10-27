@@ -8,8 +8,29 @@ CGO_LDFLAGS = "-L/opt/homebrew/lib -L/opt/homebrew/opt/librtlsdr/lib -L/usr/loca
 PKG_CONFIG_PATH = "/opt/homebrew/opt/librtlsdr/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig"
 
 [tasks]
-dev = "wails dev"
-build = "wails build"
 test = "go test ./..."
 clear = "rm -rf build/bin/ dist/"
 release-mac = "./scripts/release-mac.sh"
+
+[tasks.dev]
+description = "Start dev server with version from Git tag and commit hash"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+echo "Dev version: ${VERSION}(${COMMIT})"
+wails dev -ldflags "-X main.version=${VERSION}(${COMMIT})"
+"""
+
+[tasks.build]
+description = "Build with version from Git tag and commit hash"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+echo "Building version: ${VERSION}(${COMMIT})"
+(cd frontend && npm install && npm run build)
+wails build -ldflags "-X main.version=${VERSION}(${COMMIT})"
+"""

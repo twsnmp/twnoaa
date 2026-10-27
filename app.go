@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +33,10 @@ type App struct {
 	recMu          sync.Mutex
 	recordedPasses map[string]time.Time
 	recPassMu      sync.Mutex
+	version        string
 }
 
-func NewApp() *App {
+func NewApp(version, commit string) *App {
 	_ = logger.Init("")
 	st, err := datastore.NewStore()
 	if err != nil {
@@ -43,17 +46,66 @@ func NewApp() *App {
 	tr := tracker.NewTracker()
 	sd := sdr.NewSDR()
 
+	v := resolveAppVersion(version, commit)
+
 	return &App{
 		store:          st,
 		tracker:        tr,
 		sdrService:     sd,
 		recordedPasses: make(map[string]time.Time),
+		version:        v,
 	}
+}
+
+// resolveAppVersion resolves the application version string.
+// If version or commit are omitted or unknown (e.g. running 'wails dev' directly),
+// it attempts to extract them from build info or git.
+func resolveAppVersion(version, commit string) string {
+	v := strings.TrimSpace(version)
+	c := strings.TrimSpace(commit)
+
+	if strings.Contains(v, "(") && strings.Contains(v, ")") {
+		return v
+	}
+
+	if c == "" || c == "unknown" {
+		if bi, ok := debug.ReadBuildInfo(); ok {
+			for _, s := range bi.Settings {
+				if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+					c = s.Value[:7]
+					break
+				}
+			}
+		}
+		if c == "" || c == "unknown" {
+			if out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output(); err == nil {
+				c = strings.TrimSpace(string(out))
+			}
+		}
+	}
+
+	if v == "" {
+		if out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+			v = strings.TrimSpace(string(out))
+		} else {
+			v = "v0.1.0"
+		}
+	}
+
+	if c != "" && c != "unknown" {
+		return fmt.Sprintf("%s(%s)", v, c)
+	}
+	return v
+}
+
+// GetVersion returns the embedded application version and commit string.
+func (a *App) GetVersion() string {
+	return a.version
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	logger.Infof("APP", "twnoaa application started")
+	logger.Infof("APP", "twnoaa application started (%s)", a.version)
 
 	// Pre-fetch TLEs
 	go func() {

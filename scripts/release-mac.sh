@@ -28,9 +28,20 @@ done
 
 info "Starting macOS Release Build and Packaging Process for twnoaa"
 
-# Step 1: Build the application using Wails
+# Resolve version from Git tag and commit hash
+VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_VERSION="${VERSION}(${COMMIT})"
+info "Build version: ${BUILD_VERSION}"
+
+# Step 1: Build the frontend explicitly
+info "Building frontend assets..."
+(cd frontend && npm install && npm run build)
+success "Frontend built successfully."
+
+# Step 2: Build the application using Wails
 info "Building Wails application for macOS (Universal)..."
-wails build -platform darwin/universal -clean
+wails build -platform darwin/universal -clean -ldflags "-X main.version=${BUILD_VERSION}"
 
 ORIG_APP_PATH="build/bin/twnoaa.app"
 if [ ! -d "$ORIG_APP_PATH" ]; then
@@ -45,7 +56,7 @@ mv "$ORIG_APP_PATH" "$APP_PATH"
 
 success "Application built and prepared successfully at $APP_PATH"
 
-# Step 2: Select/Determine Application Signing Identity
+# Step 3: Select/Determine Application Signing Identity
 APP_IDENTITY=${MACOS_APP_IDENTITY:-""}
 
 if [ -z "$APP_IDENTITY" ]; then
@@ -87,12 +98,12 @@ fi
 
 info "Selected Application Identity: $APP_IDENTITY"
 
-# Step 3: Sign the .app bundle with Hardened Runtime
+# Step 4: Sign the .app bundle with Hardened Runtime
 info "Signing the application bundle with hardened runtime..."
 codesign --force --options runtime --sign "$APP_IDENTITY" --deep "$APP_PATH"
 success "Application bundle signed successfully."
 
-# Step 4: Select/Determine Installer Signing Identity
+# Step 5: Select/Determine Installer Signing Identity
 PKG_IDENTITY=${MACOS_PKG_IDENTITY:-""}
 
 if [ -z "$PKG_IDENTITY" ]; then
@@ -134,7 +145,7 @@ fi
 
 info "Selected Installer Identity: $PKG_IDENTITY"
 
-# Step 5: Package the signed .app into an unsigned .pkg (disabling relocation)
+# Step 6: Package the signed .app into an unsigned .pkg (disabling relocation)
 UNSIGNED_PKG="dist/twnoaa-unsigned.pkg"
 SIGNED_PKG="dist/twnoaa.pkg"
 COMPONENT_PLIST="dist/components.plist"
@@ -147,13 +158,13 @@ pkgbuild --root "dist" --component-plist "$COMPONENT_PLIST" --install-location "
 rm -f "$COMPONENT_PLIST"
 success "Installer package created at $UNSIGNED_PKG"
 
-# Step 6: Sign the installer package
+# Step 7: Sign the installer package
 info "Signing the installer package..."
 productsign --sign "$PKG_IDENTITY" "$UNSIGNED_PKG" "$SIGNED_PKG"
 rm -f "$UNSIGNED_PKG"
 success "Signed installer package created at $SIGNED_PKG"
 
-# Step 7: Notarize the package
+# Step 8: Notarize the package
 NOTARY_PROFILE=${MACOS_NOTARY_PROFILE:-""}
 
 if [ -z "$NOTARY_PROFILE" ]; then

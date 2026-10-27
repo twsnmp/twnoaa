@@ -1,7 +1,8 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Settings, MapPin, Sliders, Key, Save, RefreshCw, CheckCircle2, Radio, Trash2, X } from '@lucide/svelte'
+  import { Settings, MapPin, Sliders, Key, Save, RefreshCw, CheckCircle2, Radio, Trash2, X, Info } from '@lucide/svelte'
+  import { GetVersion } from '../../wailsjs/go/main/App'
 
   let cfg = $state({
     observer_lat: 36.028,
@@ -30,6 +31,21 @@
   let isLoadingStorage = $state(false)
   let showDeleteAllModal = $state(false)
   let isDeletingAllRaw = $state(false)
+  let appVersion = $state('v0.1.0')
+
+  async function loadVersion() {
+    try {
+      if (typeof GetVersion === 'function') {
+        const v = await GetVersion()
+        if (v) appVersion = v
+      } else if (window.go?.main?.App?.GetVersion) {
+        const v = await window.go.main.App.GetVersion()
+        if (v) appVersion = v
+      }
+    } catch (err) {
+      console.error("Failed to load version:", err)
+    }
+  }
 
   async function loadConfig() {
     if (window.go?.main?.App) {
@@ -101,6 +117,7 @@
   onMount(() => {
     loadConfig()
     loadRawStorageInfo()
+    loadVersion()
   })
 </script>
 
@@ -447,6 +464,18 @@
             />
           </div>
         {/if}
+      </div>
+    </div>
+
+    <!-- Application Info -->
+    <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+      <div class="flex items-center gap-2.5 text-slate-300">
+        <Info class="w-4 h-4 text-cyan-400" />
+        <h3 class="text-xs font-bold uppercase tracking-wider">{i18n.t('settings.appInfo')}</h3>
+      </div>
+      <div class="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/60">
+        <span>{i18n.t('settings.version')}</span>
+        <span class="font-mono text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-2.5 py-1 rounded-md">{appVersion}</span>
       </div>
     </div>
   </div>

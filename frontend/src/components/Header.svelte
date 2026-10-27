@@ -1,8 +1,25 @@
 <script>
+  import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
   import { Radio, Satellite, Image, Bot, Settings, Globe } from '@lucide/svelte'
+  import { GetVersion } from '../../wailsjs/go/main/App'
 
   let { activeTab = 'tracker', onTabChange = () => {}, isStreaming = false } = $props()
+  let appVersion = $state('v0.1.0')
+
+  onMount(async () => {
+    try {
+      if (typeof GetVersion === 'function') {
+        const v = await GetVersion()
+        if (v) appVersion = v
+      } else if (window.go?.main?.App?.GetVersion) {
+        const v = await window.go.main.App.GetVersion()
+        if (v) appVersion = v
+      }
+    } catch (err) {
+      console.error('Failed to get app version:', err)
+    }
+  })
 
   function toggleLang() {
     i18n.setLocale(i18n.currentLocale === 'ja' ? 'en' : 'ja')
@@ -17,8 +34,8 @@
     <div>
       <h1 class="text-xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
         twnoaa
-        <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/30">
-          v1.0.0
+        <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/30" title="Version & Commit">
+          {appVersion}
         </span>
       </h1>
       <p class="text-xs text-slate-400 font-medium">{i18n.t('subtitle')}</p>
