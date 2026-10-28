@@ -19,7 +19,7 @@ warn() {
 }
 
 # Check for required tools
-for tool in wails codesign pkgbuild productsign xcrun; do
+for tool in wails codesign pkgbuild productsign xcrun install_name_tool otool; do
   if ! command -v "$tool" &> /dev/null; then
     error "$tool is required but not installed. Exiting."
     exit 1
@@ -59,6 +59,93 @@ rm -rf "$APP_PATH"
 mv "$ORIG_APP_PATH" "$APP_PATH"
 
 success "Application built and prepared successfully at $APP_PATH"
+
+# Step 2.5: Bundle dynamic libraries (librtlsdr, libusb) into Frameworks
+info "Bundling dynamic libraries into $APP_PATH/Contents/Frameworks..."
+FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
+mkdir -p "$FRAMEWORKS_DIR"
+
+LIB_SEARCH_PATHS=(
+  "/opt/homebrew/opt/librtlsdr/lib"
+  "/opt/homebrew/lib"
+  "/usr/local/opt/librtlsdr/lib"
+  "/usr/local/lib"
+)
+
+RTLSDR_LIB=""
+for dir in "${LIB_SEARCH_PATHS[@]}"; do
+  if [ -f "$dir/librtlsdr.0.dylib" ]; then
+    RTLSDR_LIB="$dir/librtlsdr.0.dylib"
+    break
+  elif [ -f "$dir/librtlsdr.dylib" ]; then
+    RTLSDR_LIB="$dir/librtlsdr.dylib"
+    break
+  fi
+done
+
+LIBUSB_SEARCH_PATHS=(
+  "/opt/homebrew/opt/libusb/lib"
+  "/opt/homebrew/lib"
+  "/usr/local/opt/libusb/lib"
+  "/usr/local/lib"
+)
+
+LIBUSB_LIB=""
+for dir in "${LIBUSB_SEARCH_PATHS[@]}"; do
+  if [ -f "$dir/libusb-1.0.0.dylib" ]; then
+    LIBUSB_LIB="$dir/libusb-1.0.0.dylib"
+    break
+  elif [ -f "$dir/libusb-1.0.dylib" ]; then
+    LIBUSB_LIB="$dir/libusb-1.0.dylib"
+    break
+  fi
+done
+
+if [ -z "$RTLSDR_LIB" ]; then
+  error "librtlsdr not found in Homebrew or /usr/local. Please install it first (brew install librtlsdr)."
+  exit 1
+fi
+
+if [ -z "$LIBUSB_LIB" ]; then
+  error "libusb not found in Homebrew or /usr/local. Please install it first (brew install libusb)."
+  exit 1
+fi
+
+info "Found librtlsdr at: $RTLSDR_LIB"
+info "Found libusb at: $LIBUSB_LIB"
+
+# Copy library files and dereference symlinks
+cp -L "$RTLSDR_LIB" "$FRAMEWORKS_DIR/librtlsdr.0.dylib"
+cp -L "$LIBUSB_LIB" "$FRAMEWORKS_DIR/libusb-1.0.0.dylib"
+chmod 755 "$FRAMEWORKS_DIR"/*.dylib
+
+# Create symlinks inside Frameworks for compatibility
+(cd "$FRAMEWORKS_DIR" && ln -sf librtlsdr.0.dylib librtlsdr.dylib)
+(cd "$FRAMEWORKS_DIR" && ln -sf libusb-1.0.0.dylib libusb-1.0.dylib)
+
+# Update install names for libusb
+install_name_tool -id "@rpath/libusb-1.0.0.dylib" "$FRAMEWORKS_DIR/libusb-1.0.0.dylib"
+
+# Update install names and dependency links for librtlsdr
+install_name_tool -id "@rpath/librtlsdr.0.dylib" "$FRAMEWORKS_DIR/librtlsdr.0.dylib"
+LIBUSB_REF=$(otool -L "$FRAMEWORKS_DIR/librtlsdr.0.dylib" | grep "libusb-1.0" | awk '{print $1}')
+if [ -n "$LIBUSB_REF" ]; then
+  install_name_tool -change "$LIBUSB_REF" "@rpath/libusb-1.0.0.dylib" "$FRAMEWORKS_DIR/librtlsdr.0.dylib"
+fi
+
+# Update main executable
+MAIN_BIN="$APP_PATH/Contents/MacOS/twnoaa"
+RTLSDR_REF=$(otool -L "$MAIN_BIN" | grep "librtlsdr" | awk '{print $1}')
+if [ -n "$RTLSDR_REF" ]; then
+  install_name_tool -change "$RTLSDR_REF" "@rpath/librtlsdr.0.dylib" "$MAIN_BIN"
+fi
+
+# Add @executable_path/../Frameworks to rpath if not already present
+if ! otool -l "$MAIN_BIN" | grep -q "@executable_path/../Frameworks"; then
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$MAIN_BIN"
+fi
+
+success "Dynamic libraries bundled and paths configured successfully."
 
 # Step 3: Select/Determine Application Signing Identity
 APP_IDENTITY=${MACOS_APP_IDENTITY:-""}
@@ -102,10 +189,17 @@ fi
 
 info "Selected Application Identity: $APP_IDENTITY"
 
-# Step 4: Sign the .app bundle with Hardened Runtime
+# Step 4: Sign the bundled libraries and .app bundle with Hardened Runtime
+info "Signing bundled libraries with hardened runtime..."
+for lib in "$FRAMEWORKS_DIR"/*.dylib; do
+  if [ -f "$lib" ] && [ ! -L "$lib" ]; then
+    codesign --force --options runtime --timestamp --sign "$APP_IDENTITY" "$lib"
+  fi
+done
+
 info "Signing the application bundle with hardened runtime..."
-codesign --force --options runtime --sign "$APP_IDENTITY" --deep "$APP_PATH"
-success "Application bundle signed successfully."
+codesign --force --options runtime --timestamp --sign "$APP_IDENTITY" --deep "$APP_PATH"
+success "Application bundle and bundled libraries signed successfully."
 
 # Step 5: Select/Determine Installer Signing Identity
 PKG_IDENTITY=${MACOS_PKG_IDENTITY:-""}
