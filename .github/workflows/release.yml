@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+        type: string
 
 permissions:
   contents: write
@@ -29,6 +35,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -87,20 +95,32 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+          TAG="${{ inputs.tag_name }}"
+          if [ -n "$TAG" ]; then
+            VERSION="$TAG"
+          else
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+          fi
           COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
           BUILD_VERSION="${VERSION}(${COMMIT})"
+          echo "Building Linux version: ${BUILD_VERSION}"
           wails build -platform ${{ matrix.platform }} -clean -s ${{ matrix.tags }} -ldflags "-X main.version=${BUILD_VERSION}"
 
       - name: Build Wails App (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = git describe --tags --abbrev=0 2>$null
-          if (-not $version) { $version = "v0.1.0" }
+          $tag = "${{ inputs.tag_name }}"
+          if ($tag) {
+            $version = $tag
+          } else {
+            $version = git describe --tags --abbrev=0 2>$null
+            if (-not $version) { $version = "v0.1.0" }
+          }
           $commit = git rev-parse --short HEAD 2>$null
           if (-not $commit) { $commit = "unknown" }
           $buildVersion = "${version}(${commit})"
+          Write-Host "Building Windows version: ${buildVersion}"
           wails build -platform ${{ matrix.platform }} -clean -s -ldflags "-X main.version=${buildVersion}"
 
       - name: Package Release (Windows)
@@ -143,8 +163,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*
-          draft: ${{ github.ref_type != 'tag' }}
+          draft: false
           prerelease: false
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0-draft' }}
+          tag_name: ${{ inputs.tag_name || (github.ref_type == 'tag' && github.ref_name) || 'v0.1.0' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
