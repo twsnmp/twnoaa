@@ -44,6 +44,10 @@ To receive signals from orbiting weather satellites and decode high-definition i
   - **Built-in Software-Switchable Bias-Tee (4.5V DC)**: Power your active low-noise amplifier (LNA) directly through the coaxial cable with a single click in twnoaa—no external DC power injectors or extra power cables required.
 
 ### 2. Receiving Antenna
+<img src="images/hardware_antenna.jpg" width="560" alt="V-Dipole Antenna Balcony Installation Example" />
+
+*Example of a 120° V-dipole antenna mounted on a balcony railing using a clamp fixture*
+
 - **V-Dipole Antenna**:
   - Element length for 137 MHz: ~53.4 cm per element (~107 cm total tip-to-tip)
   - Angle: ~120° V-shape mounted horizontally
