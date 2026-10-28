@@ -103,15 +103,15 @@ Because satellite RF signals are very faint, proper antenna placement and LNA ca
 
 twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzing satellite imagery.
 
-### 1. Pass Tracker
-![Pass Tracker](images/screen_tracker.png)
+### 1. Pass Tracker (Live Satellite Sky Watch)
+![Pass Tracker](images/screen_tracker_en.png)
 
-- **Real-Time Satellite Flyby Monitor**:
-  - Displays real-time elevation, azimuth, Doppler frequency shift, and current sub-satellite coordinates (latitude/longitude) for active satellites (METEOR-M2 3/4, NOAA 15/18/19, ISS, SONATE-2).
-  - Highlights currently incoming satellites with an active status badge and a "Tune & Receive" shortcut button.
-- **24-Hour Upcoming Pass Schedule**:
-  - Automatically fetches the latest TLE orbital data from CelesTrak (with a manual "Update TLE" option) and calculates upcoming passes with Acquisition of Signal (AOS), Loss of Signal (LOS), Maximum Elevation (MEL), and duration.
-  - Clicking "Tune" automatically transfers the target frequency and demodulator settings to the SDR panel. Passes with MEL > 20° typically provide excellent reception.
+- **Live Satellite Sky Watch**:
+  - Displays real-time elevation, azimuth, Doppler frequency shift, and geographic coordinates for tracked satellites (METEOR-M2 3/4, NOAA 15/18/19, ISS, SONATE-2).
+  - Status badges indicate active passes ("Auto Pass Scheduler Active").
+- **Upcoming Passes (24 Hours)**:
+  - Fetches live orbital TLE data from CelesTrak (with a manual "Refresh TLEs" button) and computes passes with Acquisition of Signal (AOS), Loss of Signal (LOS), Maximum Elevation (MEL), and duration.
+  - Clicking "Tune Receiver" automatically transfers the target frequency and demodulator settings to the SDR receiver. Passes with MEL > 20° typically provide excellent reception.
 
 ### 2. 3D Globe View (Orbit)
 ![Globe View](images/screen_globe_en.png)
