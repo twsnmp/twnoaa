@@ -113,15 +113,15 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - Automatically fetches the latest TLE orbital data from CelesTrak (with a manual "Update TLE" option) and calculates upcoming passes with Acquisition of Signal (AOS), Loss of Signal (LOS), Maximum Elevation (MEL), and duration.
   - Clicking "Tune" automatically transfers the target frequency and demodulator settings to the SDR panel. Passes with MEL > 20° typically provide excellent reception.
 
-### 2. 3D Globe View
-![Globe View](images/screen_globe.png)
+### 2. 3D Globe View (Orbit)
+![Globe View](images/screen_globe_en.png)
 
-- **3D Satellite Orbit Monitor**:
-  - Interactive 3D Earth view rendering real-time satellite positions and orbital paths for all active weather satellites in orbit.
-  - Draws a live tracking beam from your ground station to in-range satellites, helping you visualize the arrival vector of the incoming RF signal.
+- **3D Satellite Orbit Watch**:
+  - Interactive 3D Earth globe visualizer rendering real-time satellite positions and orbital flight paths for all active weather satellites.
+  - Draws a live vector beam from your ground station to in-range satellites, helping you visualize the arrival vector of the incoming RF signal.
 - **Satellite Telemetry Card**:
-  - Selecting a satellite displays its center frequency, real-time elevation, azimuth, Doppler frequency shift, geographic coordinates, and flight altitude (Alt).
-  - An active "Flyby Incoming" badge lights up during passes, allowing you to jump straight into reception with "Tune & Receive".
+  - Selecting a satellite displays its center frequency, real-time elevation, azimuth, Doppler frequency shift, sub-satellite coordinates (latitude/longitude), and flight altitude (Alt).
+  - Status indicators show "STANDBY / MONITORING" or incoming pass alerts, with a "Tune & Receive Now" shortcut button to jump straight into reception.
 
 ### 3. SDR Reception Test & Spectrum (Receiver)
 ![Receiver](images/screen_sdr_en.png)
