@@ -58,6 +58,10 @@
   - 90 度位相給電による無指向性円偏波アンテナ。
 
 ### 3. LNA (低雑音増幅器) ＆ バンドパスフィルタ
+<img src="images/hardware_lna.jpg" width="360" alt="Nooelec SAWbird+ NOAA LNAモジュール" />
+
+*Nooelec SAWbird+ NOAA LNAモジュール（SMAコネクタ同軸配線、Bias-Tee受電対応）*
+
 - **推奨モデル**: **Nooelec SAWbird+ NOAA** または **RTL-SDR Blog Wideband / Filtered LNA**
 - 気象衛星からの電波は宇宙（高度約 850 km）から届く微弱な信号です。アンテナ直下で信号を強力に増幅（利得約 30dB）するとともに、SAW フィルタによって FM 放送（76-108MHz）や携帯電話・業務無線などの強力な混信ノイズを急峻に遮断します。
 - **電源供給**: twnoaa の Bias-Tee 機能を有効にすることで、同軸ケーブル経由で自動給電されます。

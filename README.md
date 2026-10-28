@@ -58,6 +58,10 @@ To receive signals from orbiting weather satellites and decode high-definition i
   - Omnidirectional 90° phased circular-polarization antenna.
 
 ### 3. LNA (Low Noise Amplifier) & Bandpass Filter
+<img src="images/hardware_lna.jpg" width="360" alt="Nooelec SAWbird+ NOAA LNA Module" />
+
+*Nooelec SAWbird+ NOAA LNA module (inline SMA coaxial cabling, powered via Bias-Tee)*
+
 - **Recommended Model**: **Nooelec SAWbird+ NOAA** or **RTL-SDR Blog Wideband / Filtered LNA**
 - Weather satellite signals arrive from ~850 km in space with very low power. An LNA placed near the antenna provides high gain (~30 dB) with an ultra-low noise figure, while the built-in SAW filter rejects strong out-of-band interference (FM broadcast 76–108 MHz, cellular, and land mobile radios).
 - **Powering**: Automatically powered via coaxial cable by turning on the Bias-Tee switch in twnoaa.
