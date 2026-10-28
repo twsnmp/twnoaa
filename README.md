@@ -138,12 +138,18 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 - **Real-Time FFT Spectrum & Waterfall**:
   - Overlaid satellite frequency markers (METEOR-M2 3/4, NOAA 15/18/19, etc.) for visual Doppler monitoring and signal lock.
 
-### 4. Image Gallery
+### 4. Satellite Image Gallery (Image Gallery)
 ![Image Gallery](images/screen_gallery.png)
 
-- Grid gallery of all saved satellite passes and decoded images.
-- **Full-Screen Viewer**: Interactive high-resolution viewer with center-locked zoom and pan for examining cloud structures, frontal boundaries, and coastlines.
-- **Raw Replay**: Re-decode previously recorded raw I/Q files with customized DSP parameters.
+- **Decoded Pass History & Filters**:
+  - Lists all received and decoded satellite passes with timestamps, frequencies, Max Elevation, SNR stats, and data badges (IQ raw signals, demodulated audio).
+  - Quick filters for recent passes, high-elevation passes (≥45°), satellite models, or multi-pass comparisons.
+- **High-Definition Image Viewer**:
+  - Displays rendered multispectral and visible/IR satellite images. Clicking the preview launches a center-locked zoom & pan viewer for inspecting cloud vortices, frontal boundaries, and coastlines.
+  - Multi-tab visualization modes: Image View, Signal SNR Chart, Multi-Pass Comparison, Audio Playback, and FFT Spectrum.
+- **Offline Processing & AI Handoff**:
+  - Re-demodulate and re-decode historical raw I/Q or WAV data offline anytime.
+  - One-click "Run AI Weather Analysis" sends the satellite image and pass telemetry directly to multimodal LLMs.
 
 ### 5. AI Meteorological Analysis
 ![AI Analysis](images/screen_ai.png)
