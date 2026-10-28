@@ -58,24 +58,24 @@ jobs:
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
-          update: false
+          msystem: UCRT64
+          update: true
           path-type: inherit
           install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-rtl-sdr
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-rtl-sdr
 
       - name: Configure Windows Environment
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
-          echo "CC=C:/msys64/mingw64/bin/gcc.exe" >> $env:GITHUB_ENV
+          echo "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
+          echo "CC=C:/msys64/ucrt64/bin/gcc.exe" >> $env:GITHUB_ENV
           echo "CGO_ENABLED=1" >> $env:GITHUB_ENV
-          echo "CGO_CFLAGS=-IC:/msys64/mingw64/include" >> $env:GITHUB_ENV
-          echo "CGO_LDFLAGS=-LC:/msys64/mingw64/lib -lrtlsdr" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=C:/msys64/mingw64/lib/pkgconfig" >> $env:GITHUB_ENV
+          echo "CGO_CFLAGS=-IC:/msys64/ucrt64/include" >> $env:GITHUB_ENV
+          echo "CGO_LDFLAGS=-LC:/msys64/ucrt64/lib -lrtlsdr" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:/msys64/ucrt64/lib/pkgconfig" >> $env:GITHUB_ENV
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
@@ -132,10 +132,10 @@ jobs:
         run: |
           # Copy required runtime DLLs next to executable
           $dlls = @(
-            "C:\msys64\mingw64\bin\librtlsdr*.dll",
-            "C:\msys64\mingw64\bin\libusb-1.0*.dll",
-            "C:\msys64\mingw64\bin\libwinpthread-1.dll",
-            "C:\msys64\mingw64\bin\libgcc_s_seh-1.dll"
+            "C:\msys64\ucrt64\bin\librtlsdr*.dll",
+            "C:\msys64\ucrt64\bin\libusb-1.0*.dll",
+            "C:\msys64\ucrt64\bin\libwinpthread-1.dll",
+            "C:\msys64\ucrt64\bin\libgcc_s_seh-1.dll"
           )
           foreach ($pattern in $dlls) {
             Get-Item $pattern -ErrorAction SilentlyContinue | ForEach-Object {
