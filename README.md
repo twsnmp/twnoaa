@@ -164,16 +164,16 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - "Copy Report" button copies the markdown report directly to your clipboard with one click.
 
 ### 6. Settings
-![Settings](images/screen_settings.png)
+![Settings](images/screen_settings_en.png)
 
-- **Station Coordinates**:
-  - Ground station label, latitude (°N), longitude (°E), and elevation (km).
-  - One-click "Auto Detect from IP Address" button automatically resolves station coordinates.
-- **SDR Receiver & Automation Settings**:
-  - **Auto-Record & Decode on Satellite Passes**: Automatically triggers SDR reception, recording, and decoding when satellites pass overhead (elevation ≥ 5°).
-  - **Bias-T (4.5V DC) Coaxial Power**: Enable/disable 4.5V DC supply for active LNAs (SAWbird+, etc.) directly through the coaxial cable.
-  - **Auto-Record Duration & Gain Settings**: Configure pass duration in seconds, manual gain (dB), or Auto Gain Control (AGC).
-  - **Raw I/Q Storage Management**: Real-time display of total saved raw signal storage space and file count, with one-click bulk deletion.
+- **Observer Location Coordinates**:
+  - Ground station label, latitude (°N), longitude (°E), and altitude (km).
+  - One-click "autoLocation" button automatically detects station coordinates from IP address.
+- **SDR Receiver Configuration (`sdrConfig`)**:
+  - **Auto-record Satellite Passes**: Automatically triggers SDR tuning, reception, recording, and decoding when satellite elevation reaches 5° or higher.
+  - **Bias-T (4.5V Coaxial Power)**: Supplies 4.5V DC power via antenna coaxial cable to power active LNAs like Nooelec SAWbird+ (RTL-SDR Blog V3/V4).
+  - **Auto Record Duration & Gain Settings**: Configure pass duration in seconds, manual gain, or Auto Tuner Gain (AGC).
+  - **Save Raw IQ Stream Data (`.iq`) & Storage**: Real-time display of total saved raw signal storage space and file count, with a "Delete All Raw IQ Data" button for easy maintenance.
 - **LLM Provider Settings**:
   - Configure Google Gemini, OpenAI, Anthropic Claude, or local Ollama with API keys, models, and custom prompts.
 - **UI Language**: Instant toggle between English and Japanese via the language icon in the top header.
