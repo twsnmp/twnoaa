@@ -1,0 +1,5 @@
+title: twnoaa
+description: 気象衛星（NOAA/METEOR）およびSSTVの自動軌道計算・SDR自動受信・DSP復調・AI気象解析を行うデスクトップアプリケーション。TWSNMPシリーズプロジェクト。
+remote_theme: pages-themes/hacker@v0.2.0
+plugins:
+- jekyll-remote-theme

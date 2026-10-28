@@ -1,0 +1,11 @@
+frontend/
+*.go
+go.mod
+go.sum
+mise.toml
+wails.json
+build/
+dist/
+pkg/
+cmd/
+scripts/

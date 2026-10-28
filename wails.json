@@ -8,7 +8,14 @@
   "frontend:dev:serverUrl": "auto",
   "wailsdevserver": "127.0.0.1:34125",
   "author": {
-    "name": "twsnmp",
+    "name": "Masayuki Yamai",
     "email": "ymi@twise.co.jp"
+  },
+  "Info": {
+    "companyName": "TWSNMP",
+    "productName": "twnoaa",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026 Masayuki Yamai",
+    "comments": "https://lhx98.linkclub.jp/twise.co.jp/"
   }
 }

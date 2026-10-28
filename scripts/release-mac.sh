@@ -34,14 +34,18 @@ COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_VERSION="${VERSION}(${COMMIT})"
 info "Build version: ${BUILD_VERSION}"
 
+# Target macOS platform (default: darwin/arm64 for Apple Silicon)
+PLATFORM=${MACOS_PLATFORM:-"darwin/arm64"}
+info "Target platform: ${PLATFORM}"
+
 # Step 1: Build the frontend explicitly
 info "Building frontend assets..."
 (cd frontend && npm install && npm run build)
 success "Frontend built successfully."
 
 # Step 2: Build the application using Wails
-info "Building Wails application for macOS (Universal)..."
-wails build -platform darwin/universal -clean -ldflags "-X main.version=${BUILD_VERSION}"
+info "Building Wails application for macOS (${PLATFORM})..."
+wails build -platform "${PLATFORM}" -clean -ldflags "-X main.version=${BUILD_VERSION}"
 
 ORIG_APP_PATH="build/bin/twnoaa.app"
 if [ ! -d "$ORIG_APP_PATH" ]; then
@@ -146,8 +150,9 @@ fi
 info "Selected Installer Identity: $PKG_IDENTITY"
 
 # Step 6: Package the signed .app into an unsigned .pkg (disabling relocation)
+ARCH_SUFFIX=$(echo "$PLATFORM" | cut -d'/' -f2)
 UNSIGNED_PKG="dist/twnoaa-unsigned.pkg"
-SIGNED_PKG="dist/twnoaa.pkg"
+SIGNED_PKG="dist/twnoaa-${VERSION}-darwin-${ARCH_SUFFIX}.pkg"
 COMPONENT_PLIST="dist/components.plist"
 
 info "Creating the installer package..."
@@ -162,7 +167,8 @@ success "Installer package created at $UNSIGNED_PKG"
 info "Signing the installer package..."
 productsign --sign "$PKG_IDENTITY" "$UNSIGNED_PKG" "$SIGNED_PKG"
 rm -f "$UNSIGNED_PKG"
-success "Signed installer package created at $SIGNED_PKG"
+cp -f "$SIGNED_PKG" "dist/twnoaa.pkg"
+success "Signed installer package created at $SIGNED_PKG (and dist/twnoaa.pkg)"
 
 # Step 8: Notarize the package
 NOTARY_PROFILE=${MACOS_NOTARY_PROFILE:-""}
@@ -182,5 +188,8 @@ xcrun notarytool submit "$SIGNED_PKG" --keychain-profile "$NOTARY_PROFILE" --wai
 
 info "Stapling notarization ticket to the installer package..."
 xcrun stapler staple "$SIGNED_PKG"
+if [ -f "dist/twnoaa.pkg" ]; then
+  xcrun stapler staple "dist/twnoaa.pkg" || true
+fi
 
 success "macOS packaging and notarization completed successfully! Signed and notarized installer is at: $SIGNED_PKG"
