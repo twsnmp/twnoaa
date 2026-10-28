@@ -166,9 +166,17 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 ### 6. Settings
 ![Settings](images/screen_settings.png)
 
-- **Station Coordinates**: Set latitude, longitude, and elevation (with one-click IP geolocation lookup).
-- **AI Providers**: Configure Google Gemini, OpenAI, Anthropic Claude, or local Ollama with API keys, models, and custom prompts.
-- **UI Language**: Switch between English and Japanese.
+- **Station Coordinates**:
+  - Ground station label, latitude (°N), longitude (°E), and elevation (km).
+  - One-click "Auto Detect from IP Address" button automatically resolves station coordinates.
+- **SDR Receiver & Automation Settings**:
+  - **Auto-Record & Decode on Satellite Passes**: Automatically triggers SDR reception, recording, and decoding when satellites pass overhead (elevation ≥ 5°).
+  - **Bias-T (4.5V DC) Coaxial Power**: Enable/disable 4.5V DC supply for active LNAs (SAWbird+, etc.) directly through the coaxial cable.
+  - **Auto-Record Duration & Gain Settings**: Configure pass duration in seconds, manual gain (dB), or Auto Gain Control (AGC).
+  - **Raw I/Q Storage Management**: Real-time display of total saved raw signal storage space and file count, with one-click bulk deletion.
+- **LLM Provider Settings**:
+  - Configure Google Gemini, OpenAI, Anthropic Claude, or local Ollama with API keys, models, and custom prompts.
+- **UI Language**: Instant toggle between English and Japanese via the language icon in the top header.
 
 ---
 
