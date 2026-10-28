@@ -6,6 +6,14 @@
 
 ---
 
+## 🗺️ System Workflow & Architecture
+
+![twnoaa System Workflow & Architecture](images/overview.png)
+
+*twnoaa integrates the full satellite reception pipeline: from SGP4 Orbit Tracking to RTL-SDR signal capture, real-time DSP (FFT Spectrum & Waterfall), multi-format image decoding, and automated multimodal AI meteorological analysis.*
+
+---
+
 ## ✨ Key Features
 
 - 🛰️ **Automated Orbit Propagation & Pass Prediction** — Built-in pure Go SGP4 engine fetches live TLEs from CelesTrak to calculate precise visible satellite passes and auto-schedule receptions based on observer coordinates.
@@ -19,6 +27,114 @@
 - 📼 **Raw I/Q Data Recording & Replay** — Capture live raw RF signals to disk and replay them anytime with different filter parameters or decoder algorithms.
 - 💾 **Local-First Persistent Storage** — Embedded bbolt key-value database securely stores all pass records, decoded images, and AI reports completely on your local machine.
 - 🌐 **Bilingual UI** — Seamless switching between English and Japanese interfaces.
+
+---
+
+## 🛠️ Hardware Requirements
+
+To receive signals from orbiting weather satellites and decode high-definition imagery, the following hardware setup is recommended:
+
+### 1. SDR Receiver (Software Defined Radio)
+![RTL-SDR Receiver](images/hardware_rtlsdr.jpg)
+
+- **Recommended Model**: **RTL-SDR Blog V3 / V4**
+- **Interface**: USB 2.0 / 3.0
+- **Features**:
+  - High sensitivity in the 137 MHz VHF weather satellite band.
+  - **Built-in Software-Switchable Bias-Tee (4.5V DC)**: Power your active low-noise amplifier (LNA) directly through the coaxial cable with a single click in twnoaa—no external DC power injectors or extra power cables required.
+
+### 2. Receiving Antenna
+- **V-Dipole Antenna**:
+  - Element length for 137 MHz: ~53.4 cm per element (~107 cm total tip-to-tip)
+  - Angle: ~120° V-shape mounted horizontally
+  - Cost-effective, easy to build or purchase as a kit, and highly effective for overhead satellite passes.
+- **QFH Antenna (Quadrifilar Helix)**:
+  - Omnidirectional circular polarization (RHCP) antenna designed specifically for polar-orbiting satellites, offering balanced reception gain from low elevation up to zenith.
+- **Turnstile Antenna (Crossed Dipole)**:
+  - Omnidirectional 90° phased circular-polarization antenna.
+
+### 3. LNA (Low Noise Amplifier) & Bandpass Filter
+- **Recommended Model**: **Nooelec SAWbird+ NOAA** or **RTL-SDR Blog Wideband / Filtered LNA**
+- Weather satellite signals arrive from ~850 km in space with very low power. An LNA placed near the antenna provides high gain (~30 dB) with an ultra-low noise figure, while the built-in SAW filter rejects strong out-of-band interference (FM broadcast 76–108 MHz, cellular, and land mobile radios).
+- **Powering**: Automatically powered via coaxial cable by turning on the Bias-Tee switch in twnoaa.
+
+### 4. Coaxial Cable & Connectors
+- 50 Ω low-loss coaxial cable (RG58, 3D-2V, LMR-195/200, etc., with SMA connectors).
+
+---
+
+## 📡 Antenna Installation & LNA Connection Guide
+
+Because satellite RF signals are very faint, proper antenna placement and LNA cabling order are critical for clear, snow-free imagery.
+
+### Antenna Placement
+1. **Clear Line of Sight**:
+   - Install the antenna in an open location with an unobstructed view of the sky (e.g., roof, balcony railing, or garden mast).
+   - Nearby buildings, dense trees, metal fences, and power lines attenuate VHF signals and introduce sync dropouts.
+2. **V-Dipole Orientation**:
+   - Keep the V-shaped element plane horizontal (parallel to the ground), and orient the opening of the V pointing True North and True South (since weather satellites travel in near-polar North-South orbits).
+
+### LNA Connection Sequence
+> [!IMPORTANT]
+> **Always connect the LNA directly at the antenna feedpoint (before long cable runs)!**
+
+```
+[Antenna] ──(Short jumper cable)──> [LNA Input] ──> [LNA Output] ──(Long Coax Cable)──> [RTL-SDR Dongle] ──> [Host PC]
+```
+
+- **Why place the LNA near the antenna?**
+  If the LNA is placed at the indoor end of a long coaxial cable, both the attenuated satellite signal and the noise picked up along the cable run will be amplified together, resulting in poor Signal-to-Noise Ratio (SNR). Amplifying the pure, un-attenuated signal right at the antenna preserves the best possible SNR.
+- **Weatherproofing**:
+  Enclose outdoor LNAs in a weatherproof junction box and wrap all outdoor RF connectors with self-amalgamating waterproof tape.
+- **Activating Bias-Tee**:
+  Toggle the **Bias-Tee** switch to ON in twnoaa's SDR control panel to supply 4.5V DC to the LNA through the coaxial line (confirm that the LNA power LED lights up).
+
+---
+
+## 🖥️ User Interface & Operation Guide
+
+twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzing satellite imagery.
+
+### 1. Pass Tracker
+![Pass Tracker](images/screen_tracker.png)
+
+- Automatically fetches live TLE orbital elements from CelesTrak and calculates upcoming passes for NOAA 15/18/19 and METEOR-M2.
+- **Data Columns**: Satellite Name, Frequency, Acquisition of Signal (AOS), Maximum Elevation, Loss of Signal (LOS), and live Countdown.
+- **Action**: Click "Select Pass" to automatically configure the SDR frequency and demodulation mode. Passes with Max Elevation > 20° typically provide excellent reception.
+
+### 2. 3D Globe View
+![Globe View](images/screen_globe.png)
+
+- Real-time 3D interactive Earth view depicting current satellite positions, orbit tracks, and reception footprints relative to your ground station coordinates.
+
+### 3. SDR Control & Spectrum
+![SDR Control & Spectrum](images/screen_sdr.png)
+
+- **Hardware Control**: Center frequency tuning, manual/auto gain adjustment, Bias-Tee (4.5V) toggle, and raw I/Q signal recording.
+- **Simulation Mode**: Run full end-to-end reception, demodulation, and AI analysis tests using internal synthetic signals even without hardware.
+- **Live FFT Spectrum & Waterfall**: High-speed real-time visualization of signal bandwidth and Doppler frequency shift.
+- **Decoder Preview**: Real-time line-by-line image rendering as APT, LRPT, or SSTV frames are decoded.
+
+### 4. Image Gallery
+![Image Gallery](images/screen_gallery.png)
+
+- Grid gallery of all saved satellite passes and decoded images.
+- **Full-Screen Viewer**: Interactive high-resolution viewer with center-locked zoom and pan for examining cloud structures, frontal boundaries, and coastlines.
+- **Raw Replay**: Re-decode previously recorded raw I/Q files with customized DSP parameters.
+
+### 5. AI Meteorological Analysis
+![AI Analysis](images/screen_ai.png)
+
+- Sends decoded satellite images and pass metadata to multimodal LLMs for automated meteorological analysis.
+- **Cat Animation**: A charming detective cat animation modal keeps you entertained while the AI model processes the imagery.
+- **Structured Report**: Generates professional markdown reports identifying cyclonic vortices, cold/warm fronts, typhoon eye structures, and convective cloud patterns.
+
+### 6. Settings
+![Settings](images/screen_settings.png)
+
+- **Station Coordinates**: Set latitude, longitude, and elevation (with one-click IP geolocation lookup).
+- **AI Providers**: Configure Google Gemini, OpenAI, Anthropic Claude, or local Ollama with API keys, models, and custom prompts.
+- **UI Language**: Switch between English and Japanese.
 
 ---
 
