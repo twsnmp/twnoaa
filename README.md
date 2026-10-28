@@ -139,17 +139,17 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - Overlaid satellite frequency markers (METEOR-M2 3/4, NOAA 15/18/19, etc.) for visual Doppler monitoring and signal lock.
 
 ### 4. Satellite Image Gallery (Image Gallery)
-![Image Gallery](images/screen_gallery.png)
+![Image Gallery](images/screen_gallery_en.png)
 
 - **Decoded Pass History & Filters**:
   - Lists all received and decoded satellite passes with timestamps, frequencies, Max Elevation, SNR stats, and data badges (IQ raw signals, demodulated audio).
-  - Quick filters for recent passes, high-elevation passes (≥45°), satellite models, or multi-pass comparisons.
+  - Quick filters for recent passes ("Latest 5"), high-elevation passes ("High Elev (≥45°)"), specific satellites, or "Multi-Pass Compare".
 - **High-Definition Image Viewer**:
   - Displays rendered multispectral and visible/IR satellite images. Clicking the preview launches a center-locked zoom & pan viewer for inspecting cloud vortices, frontal boundaries, and coastlines.
-  - Multi-tab visualization modes: Image View, Signal SNR Chart, Multi-Pass Comparison, Audio Playback, and FFT Spectrum.
+  - Multi-tab visualization modes: "APT Image", "Signal Graph", "Multi-Pass Compare", "APT Audio", and "FFT Spectrum".
 - **Offline Processing & AI Handoff**:
-  - Re-demodulate and re-decode historical raw I/Q or WAV data offline anytime.
-  - One-click "Run AI Weather Analysis" sends the satellite image and pass telemetry directly to multimodal LLMs.
+  - Re-demodulate and re-decode historical raw signals offline via "Decode from Raw IQ File" or "Decode from WAV File (Test)".
+  - One-click "Analyze with AI" sends the satellite image and pass telemetry directly to multimodal LLMs.
 
 ### 5. AI Meteorological Analysis (AI Analysis)
 ![AI Analysis](images/screen_ai_en.png)
