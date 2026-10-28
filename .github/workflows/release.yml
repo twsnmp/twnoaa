@@ -46,7 +46,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -54,25 +54,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config librtlsdr-dev
 
-      - name: Setup Windows RTL-SDR dependencies
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-rtl-sdr
+
+      - name: Configure Windows Environment
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path C:\rtlsdr | Out-Null
-          $zipUrl = "https://github.com/rtlsdrblog/rtl-sdr-blog/releases/latest/download/Release.zip"
-          $zipPath = "$env:RUNNER_TEMP\Release.zip"
-          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-          Expand-Archive -Path $zipPath -DestinationPath "$env:RUNNER_TEMP\rtlsdr-extracted" -Force
-          Copy-Item -Path "$env:RUNNER_TEMP\rtlsdr-extracted\x64\*" -Destination "C:\rtlsdr" -Recurse -Force
-
-          # Download C headers
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/rtlsdrblog/rtl-sdr-blog/master/include/rtl-sdr.h" -OutFile "C:\rtlsdr\rtl-sdr.h"
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/rtlsdrblog/rtl-sdr-blog/master/include/rtl-sdr_export.h" -OutFile "C:\rtlsdr\rtl-sdr_export.h"
-
-          echo "C:\rtlsdr" >> $env:GITHUB_PATH
+          echo "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+          echo "CC=C:/msys64/mingw64/bin/gcc.exe" >> $env:GITHUB_ENV
           echo "CGO_ENABLED=1" >> $env:GITHUB_ENV
-          echo "CGO_CFLAGS=-IC:/rtlsdr" >> $env:GITHUB_ENV
-          echo "CGO_LDFLAGS=-LC:/rtlsdr -lrtlsdr" >> $env:GITHUB_ENV
+          echo "CGO_CFLAGS=-IC:/msys64/mingw64/include" >> $env:GITHUB_ENV
+          echo "CGO_LDFLAGS=-LC:/msys64/mingw64/lib -lrtlsdr" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=C:/msys64/mingw64/lib/pkgconfig" >> $env:GITHUB_ENV
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
@@ -128,9 +131,25 @@ jobs:
         shell: pwsh
         run: |
           # Copy required runtime DLLs next to executable
-          Copy-Item -Path "C:\rtlsdr\rtlsdr.dll" -Destination "build\bin\" -Force
-          if (Test-Path "C:\rtlsdr\pthreadVC2.dll") { Copy-Item -Path "C:\rtlsdr\pthreadVC2.dll" -Destination "build\bin\" -Force }
-          if (Test-Path "C:\rtlsdr\msvcr100.dll") { Copy-Item -Path "C:\rtlsdr\msvcr100.dll" -Destination "build\bin\" -Force }
+          $dlls = @(
+            "C:\msys64\mingw64\bin\librtlsdr*.dll",
+            "C:\msys64\mingw64\bin\libusb-1.0*.dll",
+            "C:\msys64\mingw64\bin\libwinpthread-1.dll",
+            "C:\msys64\mingw64\bin\libgcc_s_seh-1.dll"
+          )
+          foreach ($pattern in $dlls) {
+            Get-Item $pattern -ErrorAction SilentlyContinue | ForEach-Object {
+              Copy-Item $_.FullName -Destination "build\bin\" -Force
+              Write-Host "Copied $($_.Name) to build\bin\"
+            }
+          }
+          # Ensure rtlsdr.dll exists for compatibility
+          if (Test-Path "build\bin\librtlsdr.dll") {
+            Copy-Item "build\bin\librtlsdr.dll" -Destination "build\bin\rtlsdr.dll" -Force
+          } elseif (Test-Path "build\bin\librtlsdr-0.dll") {
+            Copy-Item "build\bin\librtlsdr-0.dll" -Destination "build\bin\rtlsdr.dll" -Force
+            Copy-Item "build\bin\librtlsdr-0.dll" -Destination "build\bin\librtlsdr.dll" -Force
+          }
 
           # Compress all binaries and DLLs into a zip
           Compress-Archive -Path build\bin\* -DestinationPath ${{ matrix.artifact_name }}
