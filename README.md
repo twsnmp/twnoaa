@@ -123,13 +123,20 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - Selecting a satellite displays its center frequency, real-time elevation, azimuth, Doppler frequency shift, geographic coordinates, and flight altitude (Alt).
   - An active "Flyby Incoming" badge lights up during passes, allowing you to jump straight into reception with "Tune & Receive".
 
-### 3. SDR Control & Spectrum
+### 3. SDR Reception Test & Spectrum (SDR Control & Spectrum)
 ![SDR Control & Spectrum](images/screen_sdr.png)
 
-- **Hardware Control**: Center frequency tuning, manual/auto gain adjustment, Bias-Tee (4.5V) toggle, and raw I/Q signal recording.
-- **Simulation Mode**: Run full end-to-end reception, demodulation, and AI analysis tests using internal synthetic signals even without hardware.
-- **Live FFT Spectrum & Waterfall**: High-speed real-time visualization of signal bandwidth and Doppler frequency shift.
-- **Decoder Preview**: Real-time line-by-line image rendering as APT, LRPT, or SSTV frames are decoded.
+- **Hardware Control Header**:
+  - Displays detected RTL-SDR status (e.g., `RTL-SDR Device #0 (1 found) Direct librtlsdr active`).
+  - **Bias-T (4.5V DC)**: Power LNA amplifiers through the coaxial cable with a single toggle.
+  - **Force Simulation Mode**: Run synthetic signal generation without hardware connected.
+  - **Start / Stop Reception**: Toggle live streaming I/Q processing.
+- **Tuning & Demodulator Panel**:
+  - Weather satellite quick-select presets (METEOR-M2 3/4, ISS, SONATE-2, NOAA 15/18/19).
+  - Center frequency adjustment, manual tuner gain slider, and Automatic Gain Control (AGC).
+  - Recording progress bar and demodulation status indicator.
+- **Real-Time FFT Spectrum & Waterfall**:
+  - Overlaid satellite frequency markers (METEOR-M2 3/4, NOAA 15/18/19, etc.) for visual Doppler monitoring and signal lock.
 
 ### 4. Image Gallery
 ![Image Gallery](images/screen_gallery.png)
