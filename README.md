@@ -151,12 +151,17 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - Re-demodulate and re-decode historical raw I/Q or WAV data offline anytime.
   - One-click "Run AI Weather Analysis" sends the satellite image and pass telemetry directly to multimodal LLMs.
 
-### 5. AI Meteorological Analysis
+### 5. AI Meteorological Analysis (AI Analysis)
 ![AI Analysis](images/screen_ai.png)
 
-- Sends decoded satellite images and pass metadata to multimodal LLMs for automated meteorological analysis.
-- **Cat Animation**: A charming detective cat animation modal keeps you entertained while the AI model processes the imagery.
-- **Structured Report**: Generates professional markdown reports identifying cyclonic vortices, cold/warm fronts, typhoon eye structures, and convective cloud patterns.
+- **Multi-LLM Weather Analysis Engine**:
+  - Select any recorded satellite pass from the dropdown and click "Run AI Meteorological Analysis" to submit the decoded imagery and telemetry to multimodal models (Google Gemini, OpenAI, Ollama, or Anthropic).
+  - During reasoning, an animated detective cat mascot appears in a thinking modal.
+- **Structured Weather Intelligence Report**:
+  - Automatically compiles a comprehensive meteorological assessment:
+    - **Reception Summary**: Target satellite, timestamp, ground station location, max elevation, and image quality diagnosis.
+    - **Channel A & B Analysis**: Visible reflectance, cloud top temperatures, synoptic weather fronts, cyclonic vortex rotation, and typhoon eye structures.
+  - "Copy Report" button copies the markdown report directly to your clipboard with one click.
 
 ### 6. Settings
 ![Settings](images/screen_settings.png)
