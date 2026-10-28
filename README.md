@@ -116,7 +116,12 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 ### 2. 3D Globe View
 ![Globe View](images/screen_globe.png)
 
-- Real-time 3D interactive Earth view depicting current satellite positions, orbit tracks, and reception footprints relative to your ground station coordinates.
+- **3D Satellite Orbit Monitor**:
+  - Interactive 3D Earth view rendering real-time satellite positions and orbital paths for all active weather satellites in orbit.
+  - Draws a live tracking beam from your ground station to in-range satellites, helping you visualize the arrival vector of the incoming RF signal.
+- **Satellite Telemetry Card**:
+  - Selecting a satellite displays its center frequency, real-time elevation, azimuth, Doppler frequency shift, geographic coordinates, and flight altitude (Alt).
+  - An active "Flyby Incoming" badge lights up during passes, allowing you to jump straight into reception with "Tune & Receive".
 
 ### 3. SDR Control & Spectrum
 ![SDR Control & Spectrum](images/screen_sdr.png)
