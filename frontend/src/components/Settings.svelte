@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Settings, MapPin, Sliders, Key, Save, RefreshCw, CheckCircle2, Radio, Trash2, X, Info } from '@lucide/svelte'
+  import { Settings, MapPin, Sliders, Key, Save, RefreshCw, CheckCircle2, Radio, Trash2, X, Info, Satellite, Bot, Sparkles } from '@lucide/svelte'
   import { GetVersion } from '../../wailsjs/go/main/App'
 
   let cfg = $state({
@@ -148,8 +148,47 @@
     </div>
   {/if}
 
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <!-- Observer Location Card -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+    <!-- 1. Top-Left: Application Info Card -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+          <Info class="w-4 h-4 text-cyan-400" />
+          {i18n.t('settings.appInfo')}
+        </h3>
+        <span class="text-xs font-mono px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-semibold">
+          {appVersion}
+        </span>
+      </div>
+
+      <div class="flex items-start gap-3.5">
+        <div class="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400 shrink-0">
+          <Satellite class="w-6 h-6" />
+        </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <h4 class="text-sm font-bold text-slate-100">twnoaa</h4>
+            <span class="text-[10px] text-slate-400 font-medium px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/60">TWSNMP Series</span>
+          </div>
+          <p class="text-xs text-slate-400 leading-snug">
+            {i18n.t('subtitle')}
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-800/80 text-[11px]">
+        <div class="p-2.5 bg-slate-950/70 border border-slate-800/80 rounded-xl">
+          <span class="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">{i18n.t('settings.satellites')}</span>
+          <span class="text-slate-200 font-medium mt-0.5 block">{i18n.t('settings.satellitesList')}</span>
+        </div>
+        <div class="p-2.5 bg-slate-950/70 border border-slate-800/80 rounded-xl">
+          <span class="text-slate-500 block text-[10px] font-semibold uppercase tracking-wider">{i18n.t('settings.demodulation')}</span>
+          <span class="text-slate-200 font-medium mt-0.5 block">{i18n.t('settings.demodulationList')}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Top-Right: Observer Location Card -->
     <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
         <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -160,7 +199,7 @@
         <button
           onclick={autoDetectLocation}
           disabled={isFetchingLoc}
-          class="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-[11px] font-semibold text-cyan-400 flex items-center gap-1.5 transition-colors disabled:opacity-50"
+          class="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-[11px] font-semibold text-cyan-400 flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
         >
           <RefreshCw class="w-3 h-3 {isFetchingLoc ? 'animate-spin' : ''}" />
           {i18n.t('settings.autoLocation')}
@@ -213,7 +252,7 @@
       </div>
     </div>
 
-    <!-- SDR Settings Card -->
+    <!-- 3. Bottom-Left: SDR Receiver Settings Card -->
     <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
       <h3 class="text-base font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
         <Sliders class="w-4 h-4 text-cyan-400" />
@@ -387,46 +426,42 @@
       </div>
     </div>
 
-    <!-- LLM Provider Configuration Card -->
-    <div class="md:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-5">
+    <!-- 4. Bottom-Right: LLM Provider Configuration Card -->
+    <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
       <h3 class="text-base font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
-        <Key class="w-4 h-4 text-cyan-400" />
+        <Bot class="w-4 h-4 text-cyan-400" />
         {i18n.t('settings.llmConfig')}
       </h3>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label for="provider-select" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.activeProvider')}</label>
-          <select
-            id="provider-select"
-            bind:value={cfg.active_provider}
-            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:border-cyan-500"
-          >
-            <option value="ollama">Ollama (Local LLM)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
-            <option value="anthropic">Anthropic Claude</option>
-          </select>
-        </div>
-
-        <div class="flex items-center">
-          <label for="auto-analyze-checkbox" class="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer w-full">
-            <input
-              id="auto-analyze-checkbox"
-              type="checkbox"
-              bind:checked={cfg.auto_analyze}
-              class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-cyan-500"
-            />
-            <div>
-              <span class="text-xs font-bold text-slate-200 block">{i18n.t('ai.autoAnalyze')}</span>
-              <span class="text-[10px] text-slate-500 block">{i18n.t('settings.autoAnalyzeDesc')}</span>
-            </div>
-          </label>
-        </div>
+      <div>
+        <label for="provider-select" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.activeProvider')}</label>
+        <select
+          id="provider-select"
+          bind:value={cfg.active_provider}
+          class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
+        >
+          <option value="ollama">Ollama (Local LLM)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+          <option value="anthropic">Anthropic Claude</option>
+        </select>
       </div>
 
+      <label for="auto-analyze-checkbox" class="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800 cursor-pointer">
+        <input
+          id="auto-analyze-checkbox"
+          type="checkbox"
+          bind:checked={cfg.auto_analyze}
+          class="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-cyan-500"
+        />
+        <div>
+          <span class="text-xs font-bold text-slate-200 block">{i18n.t('ai.autoAnalyze')}</span>
+          <span class="text-[10px] text-slate-500 block">{i18n.t('settings.autoAnalyzeDesc')}</span>
+        </div>
+      </label>
+
       <!-- Dynamic LLM Fields: Show only settings relevant to active_provider -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/80">
+      <div class="space-y-3 pt-2 border-t border-slate-800/80">
         {#if cfg.active_provider === 'ollama'}
           <div>
             <label for="ollama-url-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.ollamaUrl')}</label>
@@ -447,8 +482,9 @@
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
             />
           </div>
+          <p class="text-[11px] text-slate-500">{i18n.t('settings.ollamaHint')}</p>
         {:else if cfg.active_provider === 'gemini'}
-          <div class="md:col-span-2">
+          <div>
             <label for="gemini-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.geminiKey')}</label>
             <input
               id="gemini-key-input"
@@ -458,8 +494,9 @@
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
             />
           </div>
+          <p class="text-[11px] text-slate-500">{i18n.t('settings.geminiHint')}</p>
         {:else if cfg.active_provider === 'openai'}
-          <div class="md:col-span-2">
+          <div>
             <label for="openai-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openaiKey')}</label>
             <input
               id="openai-key-input"
@@ -469,8 +506,9 @@
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
             />
           </div>
+          <p class="text-[11px] text-slate-500">{i18n.t('settings.openaiHint')}</p>
         {:else if cfg.active_provider === 'anthropic'}
-          <div class="md:col-span-2">
+          <div>
             <label for="anthropic-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.anthropicKey')}</label>
             <input
               id="anthropic-key-input"
@@ -480,19 +518,16 @@
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
             />
           </div>
+          <p class="text-[11px] text-slate-500">{i18n.t('settings.anthropicHint')}</p>
         {/if}
       </div>
-    </div>
 
-    <!-- Application Info -->
-    <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
-      <div class="flex items-center gap-2.5 text-slate-300">
-        <Info class="w-4 h-4 text-cyan-400" />
-        <h3 class="text-xs font-bold uppercase tracking-wider">{i18n.t('settings.appInfo')}</h3>
-      </div>
-      <div class="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/60">
-        <span>{i18n.t('settings.version')}</span>
-        <span class="font-mono text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-2.5 py-1 rounded-md">{appVersion}</span>
+      <!-- LLM Capability Note -->
+      <div class="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 flex items-start gap-2.5 text-[11px] text-slate-400">
+        <Sparkles class="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+        <p class="leading-relaxed">
+          {i18n.t('settings.llmDesc')}
+        </p>
       </div>
     </div>
   </div>
