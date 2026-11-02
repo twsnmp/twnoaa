@@ -113,7 +113,7 @@
           </span>
         {/if}
       </h2>
-      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3/4 (137.900 MHz LRPT) • ISS (145.800/437.550 MHz SSTV, 145.990 MHz Voice, 145.825 MHz APRS) • SONATE-2 (145.880 MHz SSTV) • NOAA 15/18/19 (停波済)</p>
+      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3/4 (137.900 MHz LRPT) • ISS (437.825/145.825 MHz APRS, 437.800 MHz Voice, 145.800/437.550 MHz SSTV) • SONATE-2 (145.880 MHz SSTV) • NOAA 15/18/19 (停波済)</p>
     </div>
 
     <button

@@ -39,6 +39,14 @@ type APRSDecoder struct {
 	delayBuf   []float64
 	delayIdx   int
 
+	// Audio Bandpass Filter state (900Hz HPF + 2500Hz LPF)
+	hpAlpha float64
+	lpAlpha float64
+	hp1     float64
+	hp2     float64
+	bp1     float64
+	bp2     float64
+
 	// LPF state (2-stage IIR at ~1200Hz)
 	alpha float64
 	lpf1  float64
@@ -75,6 +83,10 @@ func NewAPRSDecoder(sampleRate int) *APRSDecoder {
 		delay = 1
 	}
 
+	// Audio Bandpass Filter (900Hz HPF + 2500Hz LPF) to reject out-of-band FM discriminator noise
+	hpAlpha := math.Exp(-2.0 * math.Pi * 900.0 / sr)
+	lpAlpha := math.Exp(-2.0 * math.Pi * 2500.0 / sr)
+
 	// 2-stage LPF alpha for ~1200Hz cutoff
 	fc := 1200.0
 	alpha := math.Exp(-2.0 * math.Pi * fc / sr)
@@ -84,6 +96,8 @@ func NewAPRSDecoder(sampleRate int) *APRSDecoder {
 		delay:         delay,
 		delayBuf:      make([]float64, delay),
 		delayIdx:      0,
+		hpAlpha:       hpAlpha,
+		lpAlpha:       lpAlpha,
 		alpha:         alpha,
 		lpf1:          0.0,
 		lpf2:          0.0,
@@ -112,7 +126,17 @@ func (d *APRSDecoder) DecodeSamples(samples []float64) []*APRSPacket {
 
 	startPacketCount := len(d.allPackets)
 
-	for _, sample := range samples {
+	for _, rawSample := range samples {
+		// 0. Audio Bandpass Filter (900Hz - 2500Hz) to reject high-frequency FM discriminator noise
+		d.hp1 = d.hp1*d.hpAlpha + rawSample*(1.0-d.hpAlpha)
+		h1 := rawSample - d.hp1
+		d.hp2 = d.hp2*d.hpAlpha + h1*(1.0-d.hpAlpha)
+		h2 := h1 - d.hp2
+
+		d.bp1 = d.bp1*d.lpAlpha + h2*(1.0-d.lpAlpha)
+		d.bp2 = d.bp2*d.lpAlpha + d.bp1*(1.0-d.lpAlpha)
+		sample := d.bp2
+
 		// 1. Delay and Multiply
 		delayedSample := d.delayBuf[d.delayIdx]
 		d.delayBuf[d.delayIdx] = sample

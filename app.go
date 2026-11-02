@@ -204,8 +204,10 @@ func (a *App) startAutoRecordScheduler() {
 					}
 					isMatch := false
 					switch cfg.ISSRecordMode {
-					case "aprs":
-						isMatch = strings.Contains(sat.Name, "APRS")
+					case "aprs", "aprs_uhf":
+						isMatch = strings.Contains(sat.Name, "APRS UHF")
+					case "aprs_vhf":
+						isMatch = strings.Contains(sat.Name, "APRS VHF")
 					case "voice":
 						isMatch = strings.Contains(sat.Name, "Voice")
 					case "sstv_vhf":
@@ -213,7 +215,7 @@ func (a *App) startAutoRecordScheduler() {
 					case "sstv_uhf":
 						isMatch = strings.Contains(sat.Name, "SSTV UHF")
 					default:
-						isMatch = strings.Contains(sat.Name, "APRS")
+						isMatch = strings.Contains(sat.Name, "APRS UHF")
 					}
 					if !isMatch {
 						continue
@@ -454,8 +456,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 
 		// Mode classification
 		upperSat := strings.ToUpper(satName)
-		isAPRSSat := strings.Contains(upperSat, "APRS") || freq == 145825000
-		isVoiceSat := strings.Contains(upperSat, "VOICE") || strings.Contains(upperSat, "REPEATER") || freq == 145990000
+		isAPRSSat := strings.Contains(upperSat, "APRS") || freq == 145825000 || freq == 437825000
+		isVoiceSat := strings.Contains(upperSat, "VOICE") || strings.Contains(upperSat, "REPEATER") || freq == 437800000 || freq == 145990000
 		isLRPTSat := (strings.HasPrefix(upperSat, "METEOR") || strings.Contains(upperSat, "LRPT")) && !a.sdrService.IsSimulation()
 		isSSTVSat := !isAPRSSat && !isVoiceSat && !isLRPTSat && (freq == 145800000 || freq == 437550000 || strings.Contains(upperSat, "SSTV") || strings.Contains(upperSat, "SONATE") || freq >= 144000000)
 
@@ -678,8 +680,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
 		}
 
-		// Auto AI analysis if enabled
-		if cfg.AutoAnalyze {
+		// Auto AI analysis if enabled (only for records with a decoded image)
+		if cfg.AutoAnalyze && record.ImagePath != "" {
 			logger.Infof("RECORDING", "Triggering auto AI analysis for record %s", record.ID)
 			a.RunAIAnalysis(record.ID, "ja")
 		}
@@ -1072,7 +1074,11 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 		var aprsPackets []datastore.APRSPacket
 
 		if strings.Contains(upperBase, "APRS") {
-			freq = 145825000
+			if strings.Contains(upperBase, "VHF") || strings.Contains(upperBase, "145") {
+				freq = 145825000
+			} else {
+				freq = 437825000
+			}
 			pkts, decErr := decoder.DecodeAPRSWAVFile(wavPath)
 			err = decErr
 			res = &decoder.DecodeResult{DecodeMode: "APRS"}
@@ -1100,10 +1106,16 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 				}
 			}
 		} else if strings.Contains(upperBase, "VOICE") || strings.Contains(upperBase, "REPEATER") {
-			freq = 145990000
+			freq = 437800000
 			res = &decoder.DecodeResult{DecodeMode: "VOICE"}
 		} else if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") || strings.Contains(upperBase, "PD120") || strings.Contains(upperBase, "ROBOT") || strings.Contains(upperBase, "MARTIN") {
-			freq = 145800000
+			if strings.Contains(upperBase, "UHF") || strings.Contains(upperBase, "437") {
+				freq = 437550000
+			} else if strings.Contains(upperBase, "SONATE") {
+				freq = 145880000
+			} else {
+				freq = 145800000
+			}
 			res, err = decoder.DecodeSSTVWAVFile(wavPath, outDir, baseName)
 		} else {
 			res, err = decoder.DecodeWAVFile(wavPath, outDir, baseName)
@@ -1159,7 +1171,7 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
 		}
 
-		if cfg.AutoAnalyze {
+		if cfg.AutoAnalyze && record.ImagePath != "" {
 			logger.Infof("APP", "Triggering auto AI analysis for WAV test record %s", record.ID)
 			a.RunAIAnalysis(record.ID, "ja")
 		}
@@ -1253,9 +1265,55 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 
 		var res *decoder.DecodeResult
 		upperBase := strings.ToUpper(base)
-		if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") {
+		freq := 137100000
+		var aprsPackets []datastore.APRSPacket
+
+		if strings.Contains(upperBase, "APRS") {
+			if strings.Contains(upperBase, "VHF") || strings.Contains(upperBase, "145") {
+				freq = 145825000
+			} else {
+				freq = 437825000
+			}
+			aprsDec := decoder.NewAPRSDecoder(20800)
+			pkts := aprsDec.DecodeSamples(pcmSamples)
+			res = &decoder.DecodeResult{DecodeMode: "APRS"}
+			for _, p := range pkts {
+				dsPkt := datastore.APRSPacket{
+					Timestamp:   p.Timestamp,
+					SourceCall:  p.SourceCall,
+					DestCall:    p.DestCall,
+					Path:        p.Path,
+					PathDisplay: p.PathDisplay,
+					PayloadType: p.PayloadType,
+					HasLocation: p.HasLocation,
+					Latitude:    p.Latitude,
+					Longitude:   p.Longitude,
+					Comment:     p.Comment,
+					Message:     p.Message,
+					RawPayload:  p.RawPayload,
+					RawTNC:      p.RawTNC,
+					RSSI:        p.RSSI,
+				}
+				aprsPackets = append(aprsPackets, dsPkt)
+				a.addRecentPacket(*p)
+				if a.ctx != nil {
+					runtime.EventsEmit(a.ctx, "aprs_packet", p)
+				}
+			}
+		} else if strings.Contains(upperBase, "VOICE") || strings.Contains(upperBase, "REPEATER") {
+			freq = 437800000
+			res = &decoder.DecodeResult{DecodeMode: "VOICE"}
+		} else if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") {
+			if strings.Contains(upperBase, "UHF") || strings.Contains(upperBase, "437") {
+				freq = 437550000
+			} else if strings.Contains(upperBase, "SONATE") {
+				freq = 145880000
+			} else {
+				freq = 145800000
+			}
 			res, err = decoder.DecodeSSTV(pcmSamples, 20800, outDir, baseName)
 		} else if strings.Contains(upperBase, "METEOR") {
+			freq = 137900000
 			res, err = decoder.DecodeLRPT(iqPath, cfg.SampleRate, outDir, baseName)
 		} else {
 			res, err = decoder.DecodeAPT(pcmSamples, 20800, outDir, baseName)
@@ -1279,7 +1337,7 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 		record := &datastore.PassRecord{
 			ID:             baseName,
 			SatName:        satName,
-			Frequency:      137100000,
+			Frequency:      freq,
 			Timestamp:      time.Now(),
 			ObserverLat:    cfg.ObserverLat,
 			ObserverLon:    cfg.ObserverLon,
@@ -1296,6 +1354,7 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			RawIQPath:      iqPath,
 			DecodeMode:     res.DecodeMode,
 			DayFraction:    res.DayFraction,
+			APRSPackets:    aprsPackets,
 		}
 
 		_ = a.store.AddRecord(record)
@@ -1305,7 +1364,7 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
 		}
 
-		if cfg.AutoAnalyze {
+		if cfg.AutoAnalyze && record.ImagePath != "" {
 			a.RunAIAnalysis(record.ID, "ja")
 		}
 	}()

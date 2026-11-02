@@ -307,6 +307,7 @@
             class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
           >
             <option value="aprs">{i18n.t('settings.issModeAprs')}</option>
+            <option value="aprs_vhf">{i18n.t('settings.issModeAprsVhf')}</option>
             <option value="voice">{i18n.t('settings.issModeVoice')}</option>
             <option value="sstv_vhf">{i18n.t('settings.issModeSstvVhf')}</option>
             <option value="sstv_uhf">{i18n.t('settings.issModeSstvUhf')}</option>

@@ -18,8 +18,9 @@
     { id: 'meteor23', name: 'METEOR-M2 3', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
     { id: 'iss_sstv_vhf', name: 'ISS (SSTV VHF)', freq: 145800000, displayFreq: '145.800', active: true, mode: 'SSTV' },
     { id: 'iss_sstv_uhf', name: 'ISS (SSTV UHF)', freq: 437550000, displayFreq: '437.550', active: true, mode: 'SSTV' },
-    { id: 'iss_voice', name: 'ISS (FM Voice)', freq: 145990000, displayFreq: '145.990', active: true, mode: 'VOICE' },
-    { id: 'iss_aprs', name: 'ISS (APRS)', freq: 145825000, displayFreq: '145.825', active: true, mode: 'APRS' },
+    { id: 'iss_voice', name: 'ISS (FM Voice)', freq: 437800000, displayFreq: '437.800', active: true, mode: 'VOICE' },
+    { id: 'iss_aprs_uhf', name: 'ISS (APRS UHF)', freq: 437825000, displayFreq: '437.825', active: true, mode: 'APRS' },
+    { id: 'iss_aprs_vhf', name: 'ISS (APRS VHF)', freq: 145825000, displayFreq: '145.825', active: true, mode: 'APRS' },
     { id: 'sonate2', name: 'SONATE-2 (SSTV)', freq: 145880000, displayFreq: '145.880', active: true, mode: 'SSTV' },
     { id: 'noaa19', name: 'NOAA 19', freq: 137100000, displayFreq: '137.100', active: false, mode: 'APT (EOL)' },
     { id: 'noaa15', name: 'NOAA 15', freq: 137620000, displayFreq: '137.620', active: false, mode: 'APT (EOL)' },
@@ -437,7 +438,31 @@
             <span class="block text-[10px] font-mono text-emerald-300">137.900 (LRPT)</span>
           </button>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2">
+          <button
+            onclick={() => tunePreset(437825000, 'ISS (APRS UHF)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 437825000 ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-950 border-amber-800/60 text-slate-200 hover:border-amber-600'}"
+          >
+            ISS (APRS UHF)
+            <span class="block text-[10px] font-mono text-amber-300">437.825 (PKT)</span>
+          </button>
+
+          <button
+            onclick={() => tunePreset(145825000, 'ISS (APRS VHF)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145825000 ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-950 border-amber-800/60 text-slate-200 hover:border-amber-600'}"
+          >
+            ISS (APRS VHF)
+            <span class="block text-[10px] font-mono text-amber-300">145.825 (PKT)</span>
+          </button>
+
+          <button
+            onclick={() => tunePreset(437800000, 'ISS (FM Voice)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 437800000 ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-indigo-800/60 text-slate-200 hover:border-indigo-600'}"
+          >
+            ISS (FM Voice)
+            <span class="block text-[10px] font-mono text-indigo-300">437.800 (Rep)</span>
+          </button>
+
           <button
             onclick={() => tunePreset(145800000, 'ISS (SSTV VHF)')}
             class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145800000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
@@ -455,27 +480,11 @@
           </button>
 
           <button
-            onclick={() => tunePreset(145990000, 'ISS (FM Voice)')}
-            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145990000 ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-indigo-800/60 text-slate-200 hover:border-indigo-600'}"
-          >
-            ISS (FM Voice)
-            <span class="block text-[10px] font-mono text-indigo-300">145.990 (Rep)</span>
-          </button>
-
-          <button
-            onclick={() => tunePreset(145825000, 'ISS (APRS)')}
-            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145825000 ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-950 border-amber-800/60 text-slate-200 hover:border-amber-600'}"
-          >
-            ISS (APRS)
-            <span class="block text-[10px] font-mono text-amber-300">145.825 (PKT)</span>
-          </button>
-        </div>
-        <div class="mb-2">
-          <button
             onclick={() => tunePreset(145880000, 'SONATE-2 (SSTV)')}
-            class="w-full py-1.5 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 145880000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-300 hover:border-purple-600'}"
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145880000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
           >
-            SONATE-2 (145.880 MHz SSTV)
+            SONATE-2 (SSTV)
+            <span class="block text-[10px] font-mono text-purple-300">145.880 MHz</span>
           </button>
         </div>
         {#if centerFreq >= 144000000 && biasTee && !forceSim}

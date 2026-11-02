@@ -44,7 +44,7 @@ type Config struct {
 	SimulationMode     bool `json:"simulation_mode"`
 	AutoRecord         bool   `json:"auto_record"`
 	AutoRecordDuration int    `json:"auto_record_duration"`
-	ISSRecordMode      string `json:"iss_record_mode"` // "aprs" | "voice" | "sstv_vhf" | "sstv_uhf" | "off"
+	ISSRecordMode      string `json:"iss_record_mode"` // "aprs" | "aprs_uhf" | "aprs_vhf" | "voice" | "sstv_vhf" | "sstv_uhf" | "off"
 	SaveRawIQ          bool   `json:"save_raw_iq"`
 
 	// Data storage

@@ -81,7 +81,7 @@
         <h2 class="text-lg font-bold text-slate-100 flex items-center gap-2">
           ISS APRS パケットモニター
           <span class="text-xs font-mono font-normal px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-            145.825 MHz AFSK 1200
+            437.825 / 145.825 MHz AFSK 1200
           </span>
         </h2>
         <p class="text-xs text-slate-400 mt-0.5">
@@ -139,7 +139,7 @@
             <Radio class="w-12 h-12 text-slate-700 mb-3 animate-pulse" />
             <p class="text-sm font-semibold text-slate-400">APRS パケットがまだありません</p>
             <p class="text-xs text-slate-500 mt-1 max-w-sm">
-              SDR で 145.825 MHz（または ISS (APRS) プリセット）にチューニングして受信を開始するか、ISSの通過録音を実施してください。
+              SDR で 437.825 MHz / 145.825 MHz（ISS APRS プリセット）にチューニングして受信を開始するか、ISSの通過録音を実施してください。
             </p>
           </div>
         {:else if showRawTNC}

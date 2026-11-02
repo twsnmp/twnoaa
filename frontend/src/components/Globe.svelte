@@ -29,6 +29,8 @@
     'ISS (SSTV VHF)': '#a855f7', // Purple
     'ISS (SSTV UHF)': '#c084fc', // Light Purple
     'ISS (FM Voice)': '#818cf8', // Indigo
+    'ISS (APRS UHF)': '#f59e0b', // Amber
+    'ISS (APRS VHF)': '#fbbf24', // Light Amber
     'ISS (APRS)': '#f59e0b', // Amber
     'SONATE-2 (SSTV)': '#eab308', // Yellow
     'NOAA 15': '#3b82f6', // Blue
