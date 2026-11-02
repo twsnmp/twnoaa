@@ -6,6 +6,7 @@
   import ImageGallery from './components/ImageGallery.svelte'
   import AIAnalysis from './components/AIAnalysis.svelte'
   import Settings from './components/Settings.svelte'
+  import APRSMonitor from './components/APRSMonitor.svelte'
 
   let activeTab = $state('tracker')
   let selectedFreq = $state(137900000)
@@ -39,6 +40,8 @@
       <Globe onSelectPass={handleSelectPass} />
     {:else if activeTab === 'sdr'}
       <SDRControl initialFreq={selectedFreq} initialSat={selectedSat} onDecoded={handleDecoded} />
+    {:else if activeTab === 'aprs'}
+      <APRSMonitor />
     {:else if activeTab === 'gallery'}
       <ImageGallery onRunAI={handleRunAI} />
     {:else if activeTab === 'ai'}

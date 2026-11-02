@@ -188,7 +188,10 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 | **NOAA 18** | 137.9125 MHz | APT (FM / AM 2.4 kHz Subcarrier) | 4 km/px, 2-channel (Visible & Thermal IR) |
 | **NOAA 19** | 137.100 MHz | APT (FM / AM 2.4 kHz Subcarrier) | 4 km/px, 2-channel (Visible & Thermal IR) |
 | **METEOR-M2-3/4** | 137.100 / 137.900 MHz | LRPT (72k/80k QPSK) | 1 km/px, Digital high-resolution multispectral |
-| **ISS / SSTV** | 145.800 MHz | SSTV (FM / Various SSTV modes) | Space events & school contact picture transmissions |
+| **ISS (SSTV VHF)** | 145.800 MHz | SSTV (FM / Various SSTV modes) | Space events & school contact picture transmissions |
+| **ISS (SSTV UHF)** | 437.550 MHz | SSTV (FM / Various SSTV modes) | Recent UHF experimental SSTV transmissions |
+| **ISS (FM Voice)** | 145.990 MHz | FM Voice (Cross-band Repeater) | Worldwide amateur contacts & astronaut downlink |
+| **ISS (APRS)** | 145.825 MHz | AFSK 1200 / AX.25 Packets | Worldwide position beacons & short messages via ARISS |
 
 ---
 

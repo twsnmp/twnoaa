@@ -34,6 +34,8 @@ type App struct {
 	recordedPasses map[string]time.Time
 	recPassMu      sync.Mutex
 	version        string
+	recentPackets  []decoder.APRSPacket
+	packetMu       sync.RWMutex
 }
 
 func NewApp(version, commit string) *App {
@@ -54,7 +56,34 @@ func NewApp(version, commit string) *App {
 		sdrService:     sd,
 		recordedPasses: make(map[string]time.Time),
 		version:        v,
+		recentPackets:  make([]decoder.APRSPacket, 0),
 	}
+}
+
+func (a *App) addRecentPacket(pkt decoder.APRSPacket) {
+	a.packetMu.Lock()
+	defer a.packetMu.Unlock()
+	a.recentPackets = append(a.recentPackets, pkt)
+	if len(a.recentPackets) > 200 {
+		a.recentPackets = a.recentPackets[len(a.recentPackets)-200:]
+	}
+}
+
+// GetRecentAPRSPackets returns the list of in-memory APRS packets received
+func (a *App) GetRecentAPRSPackets() []decoder.APRSPacket {
+	a.packetMu.RLock()
+	defer a.packetMu.RUnlock()
+	res := make([]decoder.APRSPacket, len(a.recentPackets))
+	copy(res, a.recentPackets)
+	return res
+}
+
+// ClearRecentAPRSPackets clears the in-memory list of APRS packets
+func (a *App) ClearRecentAPRSPackets() string {
+	a.packetMu.Lock()
+	defer a.packetMu.Unlock()
+	a.recentPackets = make([]decoder.APRSPacket, 0)
+	return "Packets cleared"
 }
 
 // resolveAppVersion resolves the application version string.
@@ -167,8 +196,35 @@ func (a *App) startAutoRecordScheduler() {
 				if cfg.BiasTee && sat.Frequency > 140000000 {
 					continue
 				}
+
+				// Filter ISS modes according to user configured ISSRecordMode
+				if strings.Contains(strings.ToUpper(sat.Name), "ISS") {
+					if cfg.ISSRecordMode == "off" {
+						continue
+					}
+					isMatch := false
+					switch cfg.ISSRecordMode {
+					case "aprs":
+						isMatch = strings.Contains(sat.Name, "APRS")
+					case "voice":
+						isMatch = strings.Contains(sat.Name, "Voice")
+					case "sstv_vhf":
+						isMatch = strings.Contains(sat.Name, "SSTV VHF")
+					case "sstv_uhf":
+						isMatch = strings.Contains(sat.Name, "SSTV UHF")
+					default:
+						isMatch = strings.Contains(sat.Name, "APRS")
+					}
+					if !isMatch {
+						continue
+					}
+				}
+
 				if sat.IsActive { // Elevation >= 5.0°
 					passKey := fmt.Sprintf("%s_%s", sat.Name, now.Format("20060102_15"))
+					if strings.Contains(strings.ToUpper(sat.Name), "ISS") {
+						passKey = fmt.Sprintf("ISS_%s", now.Format("20060102_15"))
+					}
 
 					a.recPassMu.Lock()
 					_, alreadyRecorded := a.recordedPasses[passKey]
@@ -396,8 +452,20 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		}
 		logger.Infof("RECORDING", "Recording started: sat=%s, freq=%.4fMHz, duration=%ds, sample_rate=%dHz, tuner_gain=%s, save_raw_iq=%v", satName, float64(freq)/1e6, durationSec, cfg.SampleRate, gainDisplay, cfg.SaveRawIQ)
 
+		// Mode classification
+		upperSat := strings.ToUpper(satName)
+		isAPRSSat := strings.Contains(upperSat, "APRS") || freq == 145825000
+		isVoiceSat := strings.Contains(upperSat, "VOICE") || strings.Contains(upperSat, "REPEATER") || freq == 145990000
+		isLRPTSat := (strings.HasPrefix(upperSat, "METEOR") || strings.Contains(upperSat, "LRPT")) && !a.sdrService.IsSimulation()
+		isSSTVSat := !isAPRSSat && !isVoiceSat && !isLRPTSat && (freq == 145800000 || freq == 437550000 || strings.Contains(upperSat, "SSTV") || strings.Contains(upperSat, "SONATE") || freq >= 144000000)
+
+		var aprsDec *decoder.APRSDecoder
+		var capturedPackets []datastore.APRSPacket
+		if isAPRSSat {
+			aprsDec = decoder.NewAPRSDecoder(20800)
+		}
+
 		// Raw IQ file stream writer (always enabled for METEOR-M LRPT digital satellites or when SaveRawIQ is checked)
-		isLRPTSat := strings.HasPrefix(strings.ToUpper(satName), "METEOR") && !a.sdrService.IsSimulation()
 		saveRaw := cfg.SaveRawIQ || isLRPTSat
 		baseName := fmt.Sprintf("%s_%s", satName, time.Now().Format("20060102_150405"))
 		rawIQDir := cfg.DataDir + "/raw_iq"
@@ -472,6 +540,35 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 				iqComplex := dsp.ConvertIQToComplex(buf)
 				audio := dspEngine.DemodulateFM(iqComplex)
 				pcmSamples = append(pcmSamples, audio...)
+
+				// Real-time APRS packet decoding
+				if isAPRSSat && aprsDec != nil {
+					aprsDec.SetCurrentRSSI(rssi)
+					pkts := aprsDec.DecodeSamples(audio)
+					for _, p := range pkts {
+						dsPkt := datastore.APRSPacket{
+							Timestamp:   p.Timestamp,
+							SourceCall:  p.SourceCall,
+							DestCall:    p.DestCall,
+							Path:        p.Path,
+							PathDisplay: p.PathDisplay,
+							PayloadType: p.PayloadType,
+							HasLocation: p.HasLocation,
+							Latitude:    p.Latitude,
+							Longitude:   p.Longitude,
+							Comment:     p.Comment,
+							Message:     p.Message,
+							RawPayload:  p.RawPayload,
+							RawTNC:      p.RawTNC,
+							RSSI:        p.RSSI,
+						}
+						capturedPackets = append(capturedPackets, dsPkt)
+						a.addRecentPacket(*p)
+						if a.ctx != nil {
+							runtime.EventsEmit(a.ctx, "aprs_packet", p)
+						}
+					}
+				}
 			}
 		}
 
@@ -493,9 +590,20 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 
 		var res *decoder.DecodeResult
 		var err error
-		upperSat := strings.ToUpper(satName)
-		isSSTVSat := freq >= 144000000 || strings.Contains(upperSat, "ISS") || strings.Contains(upperSat, "SONATE") || strings.Contains(upperSat, "SSTV")
-		if isSSTVSat {
+
+		if isVoiceSat {
+			// FM Voice mode: pure audio recording without satellite image decoding
+			res = &decoder.DecodeResult{
+				DecodeMode: "VOICE",
+			}
+			logger.Infof("RECORDING", "FM Voice mode recorded (%d audio samples)", len(pcmSamples))
+		} else if isAPRSSat {
+			// APRS Packet mode: packets captured during pass
+			res = &decoder.DecodeResult{
+				DecodeMode: "APRS",
+			}
+			logger.Infof("RECORDING", "APRS mode finished: %d packets captured", len(capturedPackets))
+		} else if isSSTVSat {
 			res, err = decoder.DecodeSSTV(pcmSamples, 20800, cfg.DataDir+"/images", baseName)
 		} else if isLRPTSat && rawIQPath != "" {
 			res, err = decoder.DecodeLRPT(rawIQPath, cfg.SampleRate, cfg.DataDir+"/images", baseName)
@@ -524,6 +632,20 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 
 		maxElev, maxElevAz := a.getSatMaxElevationInfo(satName, cfg, startTime)
 
+		fullImgPath := ""
+		chanAPath := ""
+		chanBPath := ""
+		decodeMode := "UNKNOWN"
+		dayFraction := 0.0
+
+		if res != nil {
+			fullImgPath = res.FullImagePath
+			chanAPath = res.ChanAPath
+			chanBPath = res.ChanBPath
+			decodeMode = res.DecodeMode
+			dayFraction = res.DayFraction
+		}
+
 		// Create record
 		record := &datastore.PassRecord{
 			ID:             baseName,
@@ -538,14 +660,15 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			PeakRSSI:       peakRssi,
 			Gain:           gain,
 			GainAuto:       autoGain,
-			ImagePath:      res.FullImagePath,
-			ChannelA:       res.ChanAPath,
-			ChannelB:       res.ChanBPath,
+			ImagePath:      fullImgPath,
+			ChannelA:       chanAPath,
+			ChannelB:       chanBPath,
 			AudioPath:      wavPath,
 			RawIQPath:      rawIQPath,
-			DecodeMode:     res.DecodeMode,
-			DayFraction:    res.DayFraction,
+			DecodeMode:     decodeMode,
+			DayFraction:    dayFraction,
 			SignalHistory:  signalHistory,
+			APRSPackets:    capturedPackets,
 		}
 
 		_ = a.store.AddRecord(record)
@@ -946,7 +1069,40 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 		var res *decoder.DecodeResult
 		var err error
 		freq := 137100000
-		if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") || strings.Contains(upperBase, "PD120") || strings.Contains(upperBase, "ROBOT") || strings.Contains(upperBase, "MARTIN") {
+		var aprsPackets []datastore.APRSPacket
+
+		if strings.Contains(upperBase, "APRS") {
+			freq = 145825000
+			pkts, decErr := decoder.DecodeAPRSWAVFile(wavPath)
+			err = decErr
+			res = &decoder.DecodeResult{DecodeMode: "APRS"}
+			for _, p := range pkts {
+				dsPkt := datastore.APRSPacket{
+					Timestamp:   p.Timestamp,
+					SourceCall:  p.SourceCall,
+					DestCall:    p.DestCall,
+					Path:        p.Path,
+					PathDisplay: p.PathDisplay,
+					PayloadType: p.PayloadType,
+					HasLocation: p.HasLocation,
+					Latitude:    p.Latitude,
+					Longitude:   p.Longitude,
+					Comment:     p.Comment,
+					Message:     p.Message,
+					RawPayload:  p.RawPayload,
+					RawTNC:      p.RawTNC,
+					RSSI:        p.RSSI,
+				}
+				aprsPackets = append(aprsPackets, dsPkt)
+				a.addRecentPacket(*p)
+				if a.ctx != nil {
+					runtime.EventsEmit(a.ctx, "aprs_packet", p)
+				}
+			}
+		} else if strings.Contains(upperBase, "VOICE") || strings.Contains(upperBase, "REPEATER") {
+			freq = 145990000
+			res = &decoder.DecodeResult{DecodeMode: "VOICE"}
+		} else if strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV") || strings.Contains(upperBase, "PD120") || strings.Contains(upperBase, "ROBOT") || strings.Contains(upperBase, "MARTIN") {
 			freq = 145800000
 			res, err = decoder.DecodeSSTVWAVFile(wavPath, outDir, baseName)
 		} else {
@@ -958,6 +1114,20 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 				runtime.EventsEmit(a.ctx, "decode_error", err.Error())
 			}
 			return
+		}
+
+		fullImgPath := ""
+		chanAPath := ""
+		chanBPath := ""
+		decodeMode := "UNKNOWN"
+		dayFraction := 0.0
+
+		if res != nil {
+			fullImgPath = res.FullImagePath
+			chanAPath = res.ChanAPath
+			chanBPath = res.ChanBPath
+			decodeMode = res.DecodeMode
+			dayFraction = res.DayFraction
 		}
 
 		record := &datastore.PassRecord{
@@ -973,12 +1143,13 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			PeakRSSI:       0.0,
 			Gain:           cfg.TunerGain,
 			GainAuto:       cfg.TunerGainAuto,
-			ImagePath:      res.FullImagePath,
-			ChannelA:       res.ChanAPath,
-			ChannelB:       res.ChanBPath,
+			ImagePath:      fullImgPath,
+			ChannelA:       chanAPath,
+			ChannelB:       chanBPath,
 			AudioPath:      wavPath,
-			DecodeMode:     res.DecodeMode,
-			DayFraction:    res.DayFraction,
+			DecodeMode:     decodeMode,
+			DayFraction:    dayFraction,
+			APRSPackets:    aprsPackets,
 		}
 
 		_ = a.store.AddRecord(record)

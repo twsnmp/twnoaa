@@ -16,7 +16,10 @@
   const SATELLITE_LIST = [
     { id: 'meteor24', name: 'METEOR-M2 4', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
     { id: 'meteor23', name: 'METEOR-M2 3', freq: 137900000, displayFreq: '137.900', active: true, mode: 'LRPT' },
-    { id: 'iss', name: 'ISS (SSTV)', freq: 145800000, displayFreq: '145.800', active: true, mode: 'SSTV' },
+    { id: 'iss_sstv_vhf', name: 'ISS (SSTV VHF)', freq: 145800000, displayFreq: '145.800', active: true, mode: 'SSTV' },
+    { id: 'iss_sstv_uhf', name: 'ISS (SSTV UHF)', freq: 437550000, displayFreq: '437.550', active: true, mode: 'SSTV' },
+    { id: 'iss_voice', name: 'ISS (FM Voice)', freq: 145990000, displayFreq: '145.990', active: true, mode: 'VOICE' },
+    { id: 'iss_aprs', name: 'ISS (APRS)', freq: 145825000, displayFreq: '145.825', active: true, mode: 'APRS' },
     { id: 'sonate2', name: 'SONATE-2 (SSTV)', freq: 145880000, displayFreq: '145.880', active: true, mode: 'SSTV' },
     { id: 'noaa19', name: 'NOAA 19', freq: 137100000, displayFreq: '137.100', active: false, mode: 'APT (EOL)' },
     { id: 'noaa15', name: 'NOAA 15', freq: 137620000, displayFreq: '137.620', active: false, mode: 'APT (EOL)' },
@@ -242,8 +245,9 @@
 
     try {
       let satName = selectedSatName
-      if (!satName || (satName.includes('SSTV') && centerFreq < 144000000) || (!satName.includes('SSTV') && centerFreq >= 144000000)) {
-        satName = centerFreq === 145800000 ? 'ISS (SSTV)' : (centerFreq === 145880000 ? 'SONATE-2 (SSTV)' : (centerFreq === 137900000 ? 'METEOR-M2 4' : (centerFreq === 137620000 ? 'NOAA 15' : (centerFreq === 137912500 ? 'NOAA 18' : 'NOAA 19'))))
+      if (!satName) {
+        const found = SATELLITE_LIST.find(s => s.freq === centerFreq)
+        satName = found ? found.name : 'Unknown_Sat'
       }
       const err = await window.go.main.App.StartRecordingAndDecode(satName, centerFreq, totalDuration, Number(tunerGain), autoGain)
       if (err) {
@@ -433,27 +437,51 @@
             <span class="block text-[10px] font-mono text-emerald-300">137.900 (LRPT)</span>
           </button>
         </div>
-        <div class="grid grid-cols-2 gap-2 mb-2">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
           <button
-            onclick={() => tunePreset(145800000, 'ISS (SSTV)')}
-            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 145800000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
+            onclick={() => tunePreset(145800000, 'ISS (SSTV VHF)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145800000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
           >
-            ISS (SSTV)
-            <span class="block text-[10px] font-mono text-purple-300">145.800 (SSTV)</span>
+            ISS (SSTV VHF)
+            <span class="block text-[10px] font-mono text-purple-300">145.800 MHz</span>
           </button>
 
           <button
-            onclick={() => tunePreset(145880000, 'SONATE-2 (SSTV)')}
-            class="py-2 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 145880000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
+            onclick={() => tunePreset(437550000, 'ISS (SSTV UHF)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 437550000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-200 hover:border-purple-600'}"
           >
-            SONATE-2
-            <span class="block text-[10px] font-mono text-purple-300">145.880 (SSTV)</span>
+            ISS (SSTV UHF)
+            <span class="block text-[10px] font-mono text-purple-300">437.550 MHz</span>
+          </button>
+
+          <button
+            onclick={() => tunePreset(145990000, 'ISS (FM Voice)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145990000 ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-950 border-indigo-800/60 text-slate-200 hover:border-indigo-600'}"
+          >
+            ISS (FM Voice)
+            <span class="block text-[10px] font-mono text-indigo-300">145.990 (Rep)</span>
+          </button>
+
+          <button
+            onclick={() => tunePreset(145825000, 'ISS (APRS)')}
+            class="py-2 px-2.5 rounded-xl text-xs font-bold border transition-all text-left {centerFreq === 145825000 ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-950 border-amber-800/60 text-slate-200 hover:border-amber-600'}"
+          >
+            ISS (APRS)
+            <span class="block text-[10px] font-mono text-amber-300">145.825 (PKT)</span>
+          </button>
+        </div>
+        <div class="mb-2">
+          <button
+            onclick={() => tunePreset(145880000, 'SONATE-2 (SSTV)')}
+            class="w-full py-1.5 px-3 rounded-xl text-xs font-bold border transition-all {centerFreq === 145880000 ? 'bg-purple-600 border-purple-500 text-white' : 'bg-slate-950 border-purple-800/60 text-slate-300 hover:border-purple-600'}"
+          >
+            SONATE-2 (145.880 MHz SSTV)
           </button>
         </div>
         {#if centerFreq >= 144000000 && biasTee && !forceSim}
           <div class="mb-2 p-2 rounded-xl bg-amber-950/60 border border-amber-500/40 text-[10px] text-amber-200 flex items-start gap-1.5">
             <AlertCircle class="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-            <span>145MHz帯(SSTV)を実機受信する際は、137MHz用SAWフィルター付きLNAが145MHzを減衰させるため、LNAを外してアンテナ直結(Bias-T OFF)または「シミュレーション強制」でテストしてください。</span>
+            <span>145MHz/437MHz帯を受信する際は、137MHz用狭帯域SAWフィルター付きLNAが信号を減衰・遮断するため、Bias-TeeをOFFにするか広帯域アンテナをご使用ください。</span>
           </div>
         {/if}
         <div class="grid grid-cols-3 gap-2">

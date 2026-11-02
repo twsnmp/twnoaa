@@ -42,9 +42,10 @@ type Config struct {
 	TunerGainAuto      bool `json:"tuner_gain_auto"`
 	BiasTee            bool `json:"bias_tee"`
 	SimulationMode     bool `json:"simulation_mode"`
-	AutoRecord         bool `json:"auto_record"`
-	AutoRecordDuration int  `json:"auto_record_duration"`
-	SaveRawIQ          bool `json:"save_raw_iq"`
+	AutoRecord         bool   `json:"auto_record"`
+	AutoRecordDuration int    `json:"auto_record_duration"`
+	ISSRecordMode      string `json:"iss_record_mode"` // "aprs" | "voice" | "sstv_vhf" | "sstv_uhf" | "off"
+	SaveRawIQ          bool   `json:"save_raw_iq"`
 
 	// Data storage
 	DataDir string `json:"data_dir"`
@@ -80,6 +81,24 @@ type PassRecord struct {
 	AIAnalysis     string        `json:"ai_analysis"`
 	AnalysisDate   time.Time     `json:"analysis_date"`
 	SignalHistory  []SignalPoint `json:"signal_history,omitempty"`
+	APRSPackets    []APRSPacket  `json:"aprs_packets,omitempty"`
+}
+
+type APRSPacket struct {
+	Timestamp   time.Time `json:"timestamp"`
+	SourceCall  string    `json:"source_call"`
+	DestCall    string    `json:"dest_call"`
+	Path        []string  `json:"path"`
+	PathDisplay string    `json:"path_display"`
+	PayloadType string    `json:"payload_type"`
+	HasLocation bool      `json:"has_location"`
+	Latitude    float64   `json:"latitude,omitempty"`
+	Longitude   float64   `json:"longitude,omitempty"`
+	Comment     string    `json:"comment"`
+	Message     string    `json:"message,omitempty"`
+	RawPayload  string    `json:"raw_payload"`
+	RawTNC      string    `json:"raw_tnc"`
+	RSSI        float64   `json:"rssi"`
 }
 
 type Store struct {
@@ -159,6 +178,7 @@ func (s *Store) initBuckets(baseDir string) error {
 				SimulationMode:     false, // Default to hardware mode (falls back automatically if no hardware)
 				AutoRecord:         true,
 				AutoRecordDuration: 600,
+				ISSRecordMode:      "aprs",
 				SaveRawIQ:          true,
 				DataDir:            baseDir,
 			}
@@ -205,6 +225,7 @@ func (s *Store) GetConfig() Config {
 		SimulationMode:     false,
 		AutoRecord:         true,
 		AutoRecordDuration: 600,
+		ISSRecordMode:      "aprs",
 		SaveRawIQ:          true,
 	}
 
@@ -238,6 +259,10 @@ func (s *Store) GetConfig() Config {
 	cfg.APIKeyGemini = decryptField(s.key, cfg.APIKeyGemini)
 	cfg.APIKeyOpenAI = decryptField(s.key, cfg.APIKeyOpenAI)
 	cfg.APIKeyAnthropic = decryptField(s.key, cfg.APIKeyAnthropic)
+
+	if cfg.ISSRecordMode == "" {
+		cfg.ISSRecordMode = "aprs"
+	}
 
 	return cfg
 }

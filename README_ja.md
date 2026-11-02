@@ -188,7 +188,10 @@ twnoaa は、直感的なタブ切り替えインターフェースで衛星追�
 | **NOAA 18** | 137.9125 MHz | APT (FM / AM 2.4kHz Subcarrier) | 4 km/px, 可視光 & 熱赤外線 2チャンネル画像 |
 | **NOAA 19** | 137.100 MHz | APT (FM / AM 2.4kHz Subcarrier) | 4 km/px, 可視光 & 熱赤外線 2チャンネル画像 |
 | **METEOR-M2-3/4** | 137.100 / 137.900 MHz | LRPT (72k/80k QPSK) | 1 km/px, デジタル高解像度マルチスペクトル画像 |
-| **ISS / SSTV** | 145.800 MHz | SSTV (FM / 各種SSTVモード) | 国際宇宙ステーションからのイベント宇宙通信画像 |
+| **ISS (SSTV VHF)** | 145.800 MHz | SSTV (FM / PD120, Robot36等) | 国際宇宙ステーションからのイベント宇宙通信画像 |
+| **ISS (SSTV UHF)** | 437.550 MHz | SSTV (FM / 各種SSTVモード) | 近年のUHF実験送信・宇宙通信画像 |
+| **ISS (FM Voice)** | 145.990 MHz | FM Voice (クロスバンドレピータ) | 世界中のアマチュア無線交信・宇宙飛行士の肉声 |
+| **ISS (APRS)** | 145.825 MHz | AFSK 1200 / AX.25 パケット | デジピータ経由の世界中の局の位置ビーコン・メッセージ |
 
 ---
 

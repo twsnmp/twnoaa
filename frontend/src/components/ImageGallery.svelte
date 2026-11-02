@@ -993,7 +993,15 @@
               </div>
 
               <div class="flex items-center gap-1.5 shrink-0">
-                {#if rec.decode_mode === 'lrpt_spectrogram'}
+                {#if rec.decode_mode === 'VOICE'}
+                  <span class="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-[9px] font-mono font-bold border border-indigo-500/30" title="FM Voice Recording">
+                    VOICE
+                  </span>
+                {:else if rec.decode_mode === 'APRS'}
+                  <span class="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[9px] font-mono font-bold border border-amber-500/30" title="APRS Packet Record">
+                    APRS {rec.aprs_packets?.length ? `(${rec.aprs_packets.length})` : ''}
+                  </span>
+                {:else if rec.decode_mode === 'lrpt_spectrogram'}
                   <span class="px-1.5 py-0.5 bg-amber-500/15 text-amber-300 rounded text-[9px] font-mono font-bold border border-amber-500/30" title={i18n.t('gallery.spectrogramBadge')}>
                     {i18n.t('gallery.spectrogramBadgeShort')}
                   </span>
@@ -1200,6 +1208,60 @@
                     <span>{i18n.t('gallery.clickToZoom')}</span>
                   </div>
                 </button>
+              {:else if selectedRecord.decode_mode === 'VOICE'}
+                <div class="text-center py-8 px-6 space-y-3">
+                  <div class="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 inline-block mx-auto">
+                    <Music class="w-10 h-10 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 class="text-sm font-bold text-slate-100">FM 音声通信レコード</h4>
+                    <p class="text-xs text-slate-400 mt-1 max-w-sm">
+                      画像デコード対象のないFM音声パスです。上の「WAVオーディオ」タブから交信録音を再生できます。
+                    </p>
+                  </div>
+                  {#if selectedRecord.audio_path}
+                    <button
+                      type="button"
+                      onclick={() => detailViewTab = 'audio'}
+                      class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 shadow-lg transition-all"
+                    >
+                      <Volume2 class="w-4 h-4" />
+                      音声を再生する
+                    </button>
+                  {/if}
+                </div>
+              {:else if selectedRecord.decode_mode === 'APRS'}
+                <div class="w-full p-4 space-y-3">
+                  <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <div class="flex items-center gap-2 text-amber-400">
+                      <Radio class="w-4 h-4" />
+                      <span class="text-xs font-bold">APRS 受信パケット ({selectedRecord.aprs_packets?.length || 0} 件)</span>
+                    </div>
+                  </div>
+                  {#if selectedRecord.aprs_packets && selectedRecord.aprs_packets.length > 0}
+                    <div class="max-h-56 overflow-y-auto space-y-1.5 font-mono text-xs">
+                      {#each selectedRecord.aprs_packets as pkt}
+                        <div class="p-2 rounded-lg bg-slate-900 border border-slate-800 flex items-start justify-between gap-2">
+                          <div class="space-y-0.5">
+                            <div class="flex items-center gap-2">
+                              <span class="font-bold text-amber-400">{pkt.source_call}</span>
+                              <span class="text-[10px] text-slate-500">&gt; {pkt.dest_call}</span>
+                              {#if pkt.path_display}
+                                <span class="text-[10px] px-1 py-0.2 rounded bg-slate-800 text-slate-400">{pkt.path_display}</span>
+                              {/if}
+                            </div>
+                            <div class="text-slate-200 text-[11px]">{pkt.message || pkt.comment || pkt.raw_payload}</div>
+                          </div>
+                          {#if pkt.has_location}
+                            <span class="text-[10px] text-emerald-400 shrink-0 font-bold">{pkt.latitude.toFixed(2)}°, {pkt.longitude.toFixed(2)}°</span>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="text-xs text-slate-400 text-center py-6">このパスでデコードされたパケットはありません</p>
+                  {/if}
+                </div>
               {:else}
                 <div class="text-center py-10 px-6 space-y-3">
                   <AlertTriangle class="w-10 h-10 text-amber-500/80 mx-auto" />

@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import * as echarts from 'echarts'
   import 'echarts-gl'
   import { i18n } from '../i18n.svelte.js'
@@ -26,12 +26,25 @@
   const satColors = {
     'METEOR-M2 3': '#06b6d4', // Cyan
     'METEOR-M2 4': '#ec4899', // Pink
-    'ISS (SSTV)': '#a855f7', // Purple
+    'ISS (SSTV VHF)': '#a855f7', // Purple
+    'ISS (SSTV UHF)': '#c084fc', // Light Purple
+    'ISS (FM Voice)': '#818cf8', // Indigo
+    'ISS (APRS)': '#f59e0b', // Amber
     'SONATE-2 (SSTV)': '#eab308', // Yellow
     'NOAA 15': '#3b82f6', // Blue
     'NOAA 18': '#10b981', // Emerald
-    'NOAA 19': '#f59e0b', // Amber
+    'NOAA 19': '#f97316', // Orange
   }
+
+  function getSatColor(name) {
+    if (satColors[name]) return satColors[name]
+    if (name.includes('ISS')) return '#a855f7'
+    if (name.includes('METEOR')) return '#06b6d4'
+    if (name.includes('SONATE')) return '#eab308'
+    return '#3b82f6'
+  }
+
+  let aprsStations = $state([])
 
   async function loadData() {
     try {
@@ -54,6 +67,13 @@
             // Keep selected satellite state fresh
             const found = states.find(s => s.name === selectedSat.name)
             if (found) selectedSat = found
+          }
+        }
+
+        if (typeof window.go.main.App.GetRecentAPRSPackets === 'function') {
+          const pkts = await window.go.main.App.GetRecentAPRSPackets()
+          if (pkts && Array.isArray(pkts)) {
+            aprsStations = pkts.filter(p => p.has_location)
           }
         }
       }
@@ -122,7 +142,7 @@
 
     // 2. Weather Satellites
     satStates.forEach(sat => {
-      const color = satColors[sat.name] || '#a855f7'
+      const color = getSatColor(sat.name)
       const isActive = sat.is_active // Elevation >= 5°
       const altitudeScale = 350000 // Display altitude on globe (meters approx scale)
 
@@ -155,11 +175,59 @@
       })
     })
 
+    // 3. APRS Ground Stations & ISS Digipeater Arc Lines
+    const issSat = satStates.find(s => s.name.includes('ISS'))
+    const issAlt = 350000
+
+    aprsStations.forEach(st => {
+      scatterData.push({
+        name: `APRS: ${st.source_call}`,
+        isAPRS: true,
+        aprsDetail: st,
+        value: [st.longitude, st.latitude, 0],
+        symbolSize: 14,
+        itemStyle: {
+          color: '#f59e0b',
+          borderColor: '#ffffff',
+          borderWidth: 2,
+          shadowBlur: 15,
+          shadowColor: '#f59e0b'
+        }
+      })
+
+      if (issSat) {
+        lineData.push({
+          coords: [
+            [st.longitude, st.latitude, 0],
+            [issSat.longitude, issSat.latitude, issAlt]
+          ],
+          lineStyle: {
+            color: '#f59e0b',
+            opacity: 0.75,
+            width: 2,
+            type: 'solid'
+          }
+        })
+      }
+    })
+
     const option = {
       backgroundColor: '#020617', // Slate 950
       tooltip: {
         show: true,
         formatter: function (params) {
+          if (params.data && params.data.isAPRS) {
+            const st = params.data.aprsDetail
+            return `
+              <div style="font-family: sans-serif; padding: 4px 8px;">
+                <strong style="color: #f59e0b; font-size: 14px;">📍 APRS: ${st.source_call}</strong><br/>
+                <span style="color: #94a3b8;">Path:</span> ${st.path_display || 'Direct'}<br/>
+                <span style="color: #94a3b8;">Position:</span> ${st.latitude.toFixed(4)}°, ${st.longitude.toFixed(4)}°<br/>
+                <span style="color: #94a3b8;">Comment:</span> <span style="color: #f1f5f9;">${st.comment || 'N/A'}</span><br/>
+                <span style="color: #94a3b8;">RSSI:</span> ${st.rssi ? st.rssi.toFixed(1) : '-'} dBFS
+              </div>
+            `
+          }
           if (params.data && params.data.satDetail) {
             const sat = params.data.satDetail
             return `
@@ -274,7 +342,23 @@
       updateGlobe()
     }, 2000)
 
+    let cancelAprsEvent = null
+    if (window.runtime && window.runtime.EventsOn) {
+      cancelAprsEvent = window.runtime.EventsOn('aprs_packet', (pkt) => {
+        if (pkt && pkt.has_location) {
+          const idx = aprsStations.findIndex(s => s.source_call === pkt.source_call)
+          if (idx >= 0) {
+            aprsStations[idx] = pkt
+          } else {
+            aprsStations = [pkt, ...aprsStations]
+          }
+          updateGlobe()
+        }
+      })
+    }
+
     return () => {
+      if (cancelAprsEvent) cancelAprsEvent()
       window.removeEventListener('resize', handleResize)
       if (updateTimer) clearInterval(updateTimer)
       chart && chart.dispose()
@@ -307,6 +391,17 @@
         <span class="text-slate-400 font-medium">{i18n.t('globe.station')}:</span>
         <span class="font-mono text-cyan-400 font-semibold">{observerConfig.city} ({observerConfig.lat.toFixed(2)}°, {observerConfig.lon.toFixed(2)}°)</span>
       </div>
+
+      <!-- APRS Digipeated Stations Badge -->
+      {#if aprsStations.length > 0}
+        <div class="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+          <span class="text-amber-400 font-medium flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+            APRS 地上局:
+          </span>
+          <span class="font-mono text-amber-300 font-bold">{aprsStations.length} 局プロット済</span>
+        </div>
+      {/if}
     </div>
 
     <!-- Live Satellites Quick List -->

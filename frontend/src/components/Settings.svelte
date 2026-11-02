@@ -19,6 +19,7 @@
     simulation_mode: false,
     auto_record: false,
     auto_record_duration: 30,
+    iss_record_mode: 'aprs',
     tuner_gain: 400,
     tuner_gain_auto: false,
     bias_tee: false,
@@ -257,6 +258,22 @@
             step="5"
             class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
           />
+        </div>
+
+        <div>
+          <label for="iss-record-mode" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block mb-1">{i18n.t('settings.issRecordMode')}</label>
+          <select
+            id="iss-record-mode"
+            bind:value={cfg.iss_record_mode}
+            class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
+          >
+            <option value="aprs">{i18n.t('settings.issModeAprs')}</option>
+            <option value="voice">{i18n.t('settings.issModeVoice')}</option>
+            <option value="sstv_vhf">{i18n.t('settings.issModeSstvVhf')}</option>
+            <option value="sstv_uhf">{i18n.t('settings.issModeSstvUhf')}</option>
+            <option value="off">{i18n.t('settings.issModeOff')}</option>
+          </select>
+          <span class="text-[10px] text-slate-500 block mt-1">{i18n.t('settings.issRecordModeDesc')}</span>
         </div>
       {/if}
 

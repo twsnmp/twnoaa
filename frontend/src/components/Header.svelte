@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Radio, Satellite, Image, Bot, Settings, Globe } from '@lucide/svelte'
+  import { Radio, Satellite, Image, Bot, Settings, Globe, Terminal } from '@lucide/svelte'
   import { GetVersion } from '../../wailsjs/go/main/App'
 
   let { activeTab = 'tracker', onTabChange = () => {}, isStreaming = false } = $props()
@@ -68,6 +68,14 @@
       {#if isStreaming}
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
       {/if}
+    </button>
+
+    <button
+      onclick={() => onTabChange('aprs')}
+      class="px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all {activeTab === 'aprs' ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'}"
+    >
+      <Terminal class="w-4 h-4 text-amber-400" />
+      {i18n.t('tabs.aprs')}
     </button>
 
     <button
