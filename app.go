@@ -198,28 +198,8 @@ func (a *App) startAutoRecordScheduler() {
 				}
 
 				// Filter ISS modes according to user configured ISSRecordMode
-				if strings.Contains(strings.ToUpper(sat.Name), "ISS") {
-					if cfg.ISSRecordMode == "off" {
-						continue
-					}
-					isMatch := false
-					switch cfg.ISSRecordMode {
-					case "aprs", "aprs_uhf":
-						isMatch = strings.Contains(sat.Name, "APRS UHF")
-					case "aprs_vhf":
-						isMatch = strings.Contains(sat.Name, "APRS VHF")
-					case "voice":
-						isMatch = strings.Contains(sat.Name, "Voice")
-					case "sstv_vhf":
-						isMatch = strings.Contains(sat.Name, "SSTV VHF")
-					case "sstv_uhf":
-						isMatch = strings.Contains(sat.Name, "SSTV UHF")
-					default:
-						isMatch = strings.Contains(sat.Name, "APRS UHF")
-					}
-					if !isMatch {
-						continue
-					}
+				if !isSatMatchISSRecordMode(sat.Name, cfg.ISSRecordMode) {
+					continue
 				}
 
 				if sat.IsActive { // Elevation >= 5.0°
@@ -302,10 +282,43 @@ func (a *App) FetchIPLocation() (*tracker.IPLocation, error) {
 	return loc, nil
 }
 
+func isSatMatchISSRecordMode(satName string, issRecordMode string) bool {
+	if !strings.Contains(strings.ToUpper(satName), "ISS") {
+		return true
+	}
+	if issRecordMode == "off" {
+		return false
+	}
+	switch issRecordMode {
+	case "aprs", "aprs_uhf":
+		return strings.Contains(satName, "APRS UHF")
+	case "aprs_vhf":
+		return strings.Contains(satName, "APRS VHF")
+	case "voice":
+		return strings.Contains(satName, "Voice")
+	case "sstv_vhf":
+		return strings.Contains(satName, "SSTV VHF")
+	case "sstv_uhf":
+		return strings.Contains(satName, "SSTV UHF")
+	default:
+		return strings.Contains(satName, "APRS UHF")
+	}
+}
+
 // Pass Tracker API
 func (a *App) GetSatelliteStates() ([]*tracker.SatelliteState, error) {
 	cfg := a.store.GetConfig()
-	return a.tracker.GetCurrentStates(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt)
+	states, err := a.tracker.GetCurrentStates(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*tracker.SatelliteState, 0, len(states))
+	for _, s := range states {
+		if isSatMatchISSRecordMode(s.Name, cfg.ISSRecordMode) {
+			filtered = append(filtered, s)
+		}
+	}
+	return filtered, nil
 }
 
 func (a *App) GetUpcomingPasses(hours int) ([]*tracker.PassDetail, error) {
@@ -313,7 +326,17 @@ func (a *App) GetUpcomingPasses(hours int) ([]*tracker.PassDetail, error) {
 		hours = 24
 	}
 	cfg := a.store.GetConfig()
-	return a.tracker.GetUpcomingPasses(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt, hours)
+	passes, err := a.tracker.GetUpcomingPasses(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt, hours)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*tracker.PassDetail, 0, len(passes))
+	for _, p := range passes {
+		if isSatMatchISSRecordMode(p.SatName, cfg.ISSRecordMode) {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered, nil
 }
 
 func (a *App) RefreshTLEs() string {

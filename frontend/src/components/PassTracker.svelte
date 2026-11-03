@@ -7,9 +7,58 @@
 
   let satStates = $state([])
   let upcomingPasses = $state([])
-  let activeUpcomingPasses = $derived(
-    upcomingPasses.filter(p => new Date(p.los).getTime() > Date.now())
+  let issRecordMode = $state('aprs')
+
+  function isMatchISS(satName, mode) {
+    if (!satName.toUpperCase().includes('ISS')) return true
+    if (mode === 'off') return false
+    switch (mode) {
+      case 'aprs':
+      case 'aprs_uhf':
+        return satName.includes('APRS UHF')
+      case 'aprs_vhf':
+        return satName.includes('APRS VHF')
+      case 'voice':
+        return satName.includes('Voice')
+      case 'sstv_vhf':
+        return satName.includes('SSTV VHF')
+      case 'sstv_uhf':
+        return satName.includes('SSTV UHF')
+      default:
+        return satName.includes('APRS UHF')
+    }
+  }
+
+  let displayedSatStates = $derived(
+    satStates.filter(s => isMatchISS(s.name, issRecordMode))
   )
+
+  let activeUpcomingPasses = $derived(
+    upcomingPasses
+      .filter(p => new Date(p.los).getTime() > Date.now())
+      .filter(p => isMatchISS(p.sat_name, issRecordMode))
+  )
+
+  let issModeLabel = $derived.by(() => {
+    switch (issRecordMode) {
+      case 'aprs':
+      case 'aprs_uhf':
+        return 'ISS (437.825 MHz APRS)'
+      case 'aprs_vhf':
+        return 'ISS (145.825 MHz APRS)'
+      case 'voice':
+        return 'ISS (437.800 MHz Voice)'
+      case 'sstv_vhf':
+        return 'ISS (145.800 MHz SSTV)'
+      case 'sstv_uhf':
+        return 'ISS (437.550 MHz SSTV)'
+      case 'off':
+        return ''
+      default:
+        return 'ISS (437.825 MHz APRS)'
+    }
+  })
+
   let isLoading = $state(false)
   let autoRecordEnabled = $state(false)
   let autoRecordBanner = $state('')
@@ -30,10 +79,13 @@
   async function loadData() {
     if (window.go?.main?.App) {
       try {
+        const cfg = await window.go.main.App.GetConfig()
+        if (cfg) {
+          autoRecordEnabled = cfg.auto_record
+          issRecordMode = cfg.iss_record_mode || 'aprs'
+        }
         satStates = await window.go.main.App.GetSatelliteStates()
         upcomingPasses = await window.go.main.App.GetUpcomingPasses(24)
-        const cfg = await window.go.main.App.GetConfig()
-        if (cfg) autoRecordEnabled = cfg.auto_record
       } catch (err) {
         console.error("Failed to load satellite states:", err)
       }
@@ -70,6 +122,11 @@
           pollCount++
           if (pollCount % 5 === 0) {
             upcomingPasses = await window.go.main.App.GetUpcomingPasses(24)
+            const cfg = await window.go.main.App.GetConfig()
+            if (cfg) {
+              autoRecordEnabled = cfg.auto_record
+              issRecordMode = cfg.iss_record_mode || 'aprs'
+            }
           }
         } catch (err) {
           console.error("Failed to update satellite states:", err)
@@ -113,7 +170,7 @@
           </span>
         {/if}
       </h2>
-      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3/4 (137.900 MHz LRPT) • ISS (437.825/145.825 MHz APRS, 437.800 MHz Voice, 145.800/437.550 MHz SSTV) • SONATE-2 (145.880 MHz SSTV) • NOAA 15/18/19 (停波済)</p>
+      <p class="text-xs text-slate-400 mt-0.5">METEOR-M2 3/4 (137.900 MHz LRPT){#if issModeLabel} • {issModeLabel}{/if} • SONATE-2 (145.880 MHz SSTV) • NOAA 15/18/19 (停波済)</p>
     </div>
 
     <button
@@ -134,8 +191,8 @@
   {/if}
 
   <!-- Realtime Satellite Cards -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 flex-shrink-0">
-    {#each satStates as sat}
+  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-3 flex-shrink-0">
+    {#each displayedSatStates as sat}
       <div class="bg-slate-900/90 border {sat.is_active ? 'border-emerald-500/50 shadow-lg shadow-emerald-500/10' : sat.operational === false ? 'border-slate-800/60 opacity-60' : 'border-slate-800'} rounded-xl p-3 relative overflow-hidden transition-all">
         {#if sat.is_active}
           <div class="absolute top-0 right-0 bg-emerald-500/20 text-emerald-400 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-bl-xl border-l border-b border-emerald-500/30 flex items-center gap-1">
