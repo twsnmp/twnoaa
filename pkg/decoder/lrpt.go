@@ -1132,37 +1132,76 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 		return nil, false, nil
 	}
 
-	// 1. Detect 00:00 UTC rollover in segments (86,400,000 ms = 24h)
+	// 1. Detect 00:00 UTC rollover in segments (86,400,000 ms = 24h) and filter timestamp outliers
 	type timeSegment struct {
 		mcuSegment
 		totalMs int64
 	}
-	timeSegs := make([]timeSegment, len(segments))
+
+	// Compute median ms to filter wild timestamp bit-flip outliers
+	var validRawMs []uint32
+	for _, s := range segments {
+		validRawMs = append(validRawMs, s.ms)
+	}
+	sort.Slice(validRawMs, func(i, j int) bool { return validRawMs[i] < validRawMs[j] })
+	medianMs := int64(validRawMs[len(validRawMs)/2])
+
+	// Detect if timestamps are completely frozen (e.g. Meteor-M2-4 on-board clock lock bug)
+	// where all packets are within < 10 seconds despite > 100 packets.
+	minRawMs := int64(validRawMs[0])
+	maxRawMs := int64(validRawMs[len(validRawMs)-1])
+	isClockFrozen := len(segments) > 100 && (maxRawMs-minRawMs) < 10000
+
+	var timeSegs []timeSegment
 	var dayOffset int64
 	var prevRawMs uint32
 	if len(segments) > 0 {
 		prevRawMs = segments[0].ms
 	}
-	for i, s := range segments {
+	for _, s := range segments {
+		// Midnight rollover handling
 		if prevRawMs > 70000000 && s.ms < 15000000 {
 			dayOffset += 86400000
 		} else if s.ms > 70000000 && prevRawMs < 15000000 && dayOffset >= 86400000 {
 			dayOffset -= 86400000
 		}
 		prevRawMs = s.ms
-		timeSegs[i] = timeSegment{
-			mcuSegment: s,
-			totalMs:    int64(s.ms) + dayOffset,
+
+		curTotal := int64(s.ms) + dayOffset
+		// Filter isolated outlier timestamps (> 30 minutes from median) to prevent cluster disruption
+		if !isClockFrozen && math.Abs(float64(curTotal-medianMs)) > 1800000.0 {
+			// Skip corrupted outlier packet timestamp
+			continue
 		}
+
+		timeSegs = append(timeSegs, timeSegment{
+			mcuSegment: s,
+			totalMs:    curTotal,
+		})
 	}
 
-	// Sort segments primarily by totalMs, secondarily by mcuID
-	sort.Slice(timeSegs, func(i, j int) bool {
-		if timeSegs[i].totalMs != timeSegs[j].totalMs {
-			return timeSegs[i].totalMs < timeSegs[j].totalMs
-		}
-		return timeSegs[i].mcuID < timeSegs[j].mcuID
-	})
+	// Sort segments:
+	// If clock is frozen, sort by seqCnt; otherwise by totalMs then mcuID
+	if isClockFrozen {
+		logger.Warnf("DECODER", "Detected frozen on-board satellite clock (span=%dms for %d packets). Falling back to sequence-based scanline clustering.", maxRawMs-minRawMs, len(segments))
+		sort.Slice(timeSegs, func(i, j int) bool {
+			diff := (int(timeSegs[j].seqCnt) - int(timeSegs[i].seqCnt)) & 0x3FFF
+			if diff > 0x2000 {
+				return false // i is after j
+			}
+			if diff != 0 {
+				return true // i is before j
+			}
+			return timeSegs[i].mcuID < timeSegs[j].mcuID
+		})
+	} else {
+		sort.Slice(timeSegs, func(i, j int) bool {
+			if timeSegs[i].totalMs != timeSegs[j].totalMs {
+				return timeSegs[i].totalMs < timeSegs[j].totalMs
+			}
+			return timeSegs[i].mcuID < timeSegs[j].mcuID
+		})
+	}
 
 	// 2. Compute and log statistics per APID (packets, min, max, p02, p98, mean)
 	type apidStats struct {
@@ -1235,6 +1274,8 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 	const scanPeriod = 1230.85
 	var currentClusterMs int64 = -1
 	currentKey := 0
+	currentBaseSeq := -1
+	prevSeq := -1
 	type scanLine = lrptScanLine
 	lineMap := make(map[int]*lrptScanLine)
 	var validKeys []int
@@ -1262,24 +1303,52 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 		targetIRAPID, isThermalIR)
 
 	for _, ts := range timeSegs {
-		// MSU-MR mirror scans West to East in 1230.85ms, transmitting 14 MCU segments per channel.
-		// Subtracting nominal transmission delay aligns all 14 segments to scanline start.
-		segOffsetMs := int64(float64(ts.mcuID/14) * (scanPeriod / 14.0))
-		normMs := ts.totalMs - segOffsetMs
-
-		if currentClusterMs < 0 {
-			currentClusterMs = normMs
-			currentKey = 0
-		} else {
-			diff := normMs - currentClusterMs
-			if diff > 600 { // New scanline cluster (threshold is approx half scanPeriod 1230.85ms)
-				skipped := int(math.Round(float64(diff) / scanPeriod))
-				if skipped < 1 {
-					skipped = 1
+		if isClockFrozen {
+			// Sequence-based line clustering for satellites with frozen clocks
+			if currentBaseSeq < 0 {
+				currentBaseSeq = int(ts.seqCnt)
+				currentKey = 0
+			} else {
+				diffSeq := (int(ts.seqCnt) - currentBaseSeq) & 0x3FFF
+				lineAdvance := int(float64(diffSeq) / 42.0)
+				if lineAdvance > currentKey {
+					currentKey = lineAdvance
 				}
-				currentKey += skipped
-				currentClusterMs = normMs
 			}
+		} else {
+			// Timestamp-based line clustering
+			segOffsetMs := int64(float64(ts.mcuID/14) * (scanPeriod / 14.0))
+			normMs := ts.totalMs - segOffsetMs
+
+			if currentClusterMs < 0 {
+				currentClusterMs = normMs
+				currentKey = 0
+				prevSeq = int(ts.seqCnt)
+			} else {
+				diff := normMs - currentClusterMs
+				if diff > 600 { // New scanline cluster (threshold is approx half scanPeriod 1230.85ms)
+					skipped := int(math.Round(float64(diff) / scanPeriod))
+					if skipped < 1 {
+						skipped = 1
+					}
+					// If time gap is large (> 15s) but sequence count advance is small, bound skipped lines
+					if skipped > 12 && prevSeq >= 0 {
+						diffSeq := (int(ts.seqCnt) - prevSeq) & 0x3FFF
+						if diffSeq < 500 {
+							seqSkipped := int(math.Round(float64(diffSeq) / 42.0))
+							if seqSkipped < skipped {
+								skipped = seqSkipped
+							}
+						}
+					}
+					if skipped > 200 {
+						skipped = 200
+					}
+					currentKey += skipped
+					currentClusterMs = normMs
+				}
+			}
+			prevSeq = int(ts.seqCnt)
 		}
 
 		key := currentKey
@@ -1319,12 +1388,33 @@ func decodeLRPTPureGoImagery(f *os.File, totalSamples, sampleRate int, outDir, b
 	sort.Ints(validKeys)
 
 	// 4. Absolute scan line grid allocation (preventing line collapse and OOM)
+	// Find optimal window of maxAllowedLines that covers the maximum density of validKeys
 	minKey := validKeys[0]
 	maxKey := validKeys[len(validKeys)-1]
 
 	const maxAllowedLines = 1200 // Max 1200 scan lines (~16 minutes pass, 9600px height) to prevent OOM
 	if maxKey-minKey+1 > maxAllowedLines {
+		bestStart := minKey
+		maxCount := 0
+		r := 0
+		for l := 0; l < len(validKeys); l++ {
+			for r < len(validKeys) && validKeys[r]-validKeys[l]+1 <= maxAllowedLines {
+				r++
+			}
+			cnt := r - l
+			if cnt > maxCount {
+				maxCount = cnt
+				bestStart = validKeys[l]
+			}
+		}
+		minKey = bestStart
 		maxKey = minKey + maxAllowedLines - 1
+		for i := len(validKeys) - 1; i >= 0; i-- {
+			if validKeys[i] <= maxKey && validKeys[i] >= minKey {
+				maxKey = validKeys[i]
+				break
+			}
+		}
 	}
 
 	numLines := maxKey - minKey + 1
