@@ -11,6 +11,8 @@ import (
 	"sort"
 )
 
+const nbfmFIRTaps = 101
+
 type DSP struct {
 	sampleRate    int
 	targetRate    int
@@ -26,6 +28,20 @@ type DSP struct {
 	iqDecPhase    int        // Phase accumulator for IQ decimation
 	audioDecPhase int        // Phase accumulator for audio decimation
 	audioDecSum   float64    // Running sum for audio decimation boxcar filter
+
+	// Narrowband FM (NBFM) state for APRS / FM Voice channel isolation & de-emphasis
+	narrowband     bool
+	nbfmBoxI       float64
+	nbfmBoxQ       float64
+	nbfmShiftHz    float64
+	nbfmHasLock    bool
+	nbfmHoldChunks int
+	nbfmPhase      float64
+	nbfmFIR        [nbfmFIRTaps]float64
+	nbfmHistI      [nbfmFIRTaps]float64
+	nbfmHistQ      [nbfmFIRTaps]float64
+	nbfmHistPos    int
+	nbfmDeemph     float64
 }
 
 func NewDSP(sampleRate, targetAudioRate int) *DSP {
@@ -33,10 +49,42 @@ func NewDSP(sampleRate, targetAudioRate int) *DSP {
 	if dec < 1 {
 		dec = 1
 	}
-	return &DSP{
-		sampleRate: sampleRate,
-		targetRate: targetAudioRate,
-		decimation: dec,
+	d := &DSP{
+		sampleRate:  sampleRate,
+		targetRate:  targetAudioRate,
+		decimation:  dec,
+		nbfmShiftHz: 5000.0, // Stationary center bias (+5.0 kHz) covering [-2.5 kHz, +12.5 kHz] while rejecting -20 kHz
+	}
+	d.initNBFMFilter(104000.0, 7500.0)
+	return d
+}
+
+// SetNarrowband enables or disables Narrowband FM (NBFM) channel filtering (±7.5 kHz FIR + 75µs de-emphasis).
+// Enabling this isolates the target APRS/Voice channel from strong adjacent transmitters (such as 437.800 MHz
+// 25 kHz below 437.825 MHz on the ISS).
+func (d *DSP) SetNarrowband(enable bool) {
+	d.narrowband = enable
+}
+
+func (d *DSP) initNBFMFilter(sr1, cutoffHz float64) {
+	mid := nbfmFIRTaps / 2
+	var hSum float64
+	for i := 0; i < nbfmFIRTaps; i++ {
+		n := float64(i - mid)
+		var sinc float64
+		if n == 0 {
+			sinc = 2.0 * cutoffHz / sr1
+		} else {
+			sinc = math.Sin(2.0*math.Pi*cutoffHz*n/sr1) / (math.Pi * n)
+		}
+		win := 0.54 - 0.46*math.Cos(2.0*math.Pi*float64(i)/float64(nbfmFIRTaps-1))
+		d.nbfmFIR[i] = sinc * win
+		hSum += d.nbfmFIR[i]
+	}
+	if hSum != 0 {
+		for i := range d.nbfmFIR {
+			d.nbfmFIR[i] /= hSum
+		}
 	}
 }
 
@@ -70,6 +118,9 @@ func ConvertFloatToINT16(samples []float64) []int16 {
 func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 	if len(iq) == 0 {
 		return nil
+	}
+	if d.narrowband {
+		return d.demodulateNBFM(iq)
 	}
 
 	// Target intermediate rate for FM demodulation (~104 kHz)
@@ -165,6 +216,122 @@ func (d *DSP) DemodulateFM(iq []complex128) []float64 {
 				acAudio = -1.0
 			}
 			audioOut = append(audioOut, acAudio)
+		}
+	}
+
+	return audioOut
+}
+
+// demodulateNBFM performs narrowband FM demodulation with adjacent-channel rejection (±7.5 kHz 101-tap FIR)
+// and 75µs de-emphasis for APRS (1200 baud AFSK) and FM Voice satellite links.
+func (d *DSP) demodulateNBFM(iq []complex128) []float64 {
+	intermediateRate := 104000
+	iqDec := d.sampleRate / intermediateRate
+	if iqDec < 1 {
+		iqDec = 1
+	}
+	actualIQRate := d.sampleRate / iqDec
+	audioDec := actualIQRate / d.targetRate
+	if audioDec < 1 {
+		audioDec = 1
+	}
+
+	// 1. Remove RTL-SDR DC offset at 0 Hz (so the NCO shift does not move a DC spike into the ±7.5 kHz passband)
+	// and perform frequency shift (+5.0 kHz center bias) & boxcar decimation from 2.08 MHz -> 104 kHz
+	var sumI, sumQ float64
+	for i := 0; i < len(iq); i++ {
+		sumI += real(iq[i])
+		sumQ += imag(iq[i])
+	}
+	meanI := sumI / float64(len(iq))
+	meanQ := sumQ / float64(len(iq))
+
+	dPhase := -2.0 * math.Pi * d.nbfmShiftHz / float64(d.sampleRate)
+	decimatedIQ := make([]complex128, 0, (len(iq)+iqDec-1)/iqDec)
+	for i := 0; i < len(iq); i++ {
+		raw := iq[i]
+		xI := real(raw) - meanI
+		xQ := imag(raw) - meanQ
+		c := math.Cos(d.nbfmPhase)
+		sn := math.Sin(d.nbfmPhase)
+		d.nbfmBoxI += xI*c - xQ*sn
+		d.nbfmBoxQ += xI*sn + xQ*c
+		d.nbfmPhase += dPhase
+		if d.nbfmPhase > 2*math.Pi || d.nbfmPhase < -2*math.Pi {
+			d.nbfmPhase = math.Mod(d.nbfmPhase, 2*math.Pi)
+		}
+
+		d.iqDecPhase++
+		if d.iqDecPhase >= iqDec {
+			d.iqDecPhase = 0
+			decimatedIQ = append(decimatedIQ, complex(d.nbfmBoxI/float64(iqDec), d.nbfmBoxQ/float64(iqDec)))
+			d.nbfmBoxI = 0
+			d.nbfmBoxQ = 0
+		}
+	}
+
+	if len(decimatedIQ) == 0 {
+		return nil
+	}
+
+	// 2. Stationary ±7.5 kHz 101-tap Hamming FIR LPF at 104 kHz
+	// (covering [-2.5 kHz, +12.5 kHz] for in-band Doppler while rejecting adjacent channels like 437.800 MHz at -20 kHz by >50 dB)
+	scaleFactor := 6.0 / math.Pi
+	audio104k := make([]float64, len(decimatedIQ))
+
+	for i, s := range decimatedIQ {
+		d.nbfmHistI[d.nbfmHistPos] = real(s)
+		d.nbfmHistQ[d.nbfmHistPos] = imag(s)
+
+		var fI, fQ float64
+		pos := d.nbfmHistPos
+		for k := 0; k < nbfmFIRTaps; k++ {
+			h := d.nbfmFIR[k]
+			fI += d.nbfmHistI[pos] * h
+			fQ += d.nbfmHistQ[pos] * h
+			pos--
+			if pos < 0 {
+				pos = nbfmFIRTaps - 1
+			}
+		}
+		d.nbfmHistPos = (d.nbfmHistPos + 1) % nbfmFIRTaps
+
+		filteredSample := complex(fI, fQ)
+		if d.prevSample == 0 {
+			d.prevSample = filteredSample
+			audio104k[i] = 0
+			continue
+		}
+
+		i0 := real(d.prevSample)
+		q0 := imag(d.prevSample)
+		num := i0*fQ - q0*fI
+		den := i0*fI + q0*fQ
+		d.prevSample = filteredSample
+
+		audio104k[i] = math.Atan2(num, den) * scaleFactor
+	}
+
+	// 3. Decimate 104 kHz -> 20.8 kHz & apply 75µs FM de-emphasis
+	alphaDeemph := math.Exp(-1.0 / (float64(d.targetRate) * 75e-6))
+	audioOut := make([]float64, 0, (len(audio104k)+audioDec-1)/audioDec)
+	for i := 0; i < len(audio104k); i++ {
+		d.audioDecSum += audio104k[i]
+		d.audioDecPhase++
+		if d.audioDecPhase >= audioDec {
+			val := d.audioDecSum / float64(audioDec)
+			d.audioDecSum = 0.0
+			d.audioDecPhase = 0
+
+			d.nbfmDeemph = d.nbfmDeemph*alphaDeemph + val*(1.0-alphaDeemph)
+			out := d.nbfmDeemph
+			if out > 1.0 {
+				out = 1.0
+			}
+			if out < -1.0 {
+				out = -1.0
+			}
+			audioOut = append(audioOut, out)
 		}
 	}
 

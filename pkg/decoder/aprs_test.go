@@ -239,3 +239,51 @@ func TestAPRSMessageAndStatusPacket(t *testing.T) {
 		t.Errorf("Expected payload_type status, got %s", pkts2[0].PayloadType)
 	}
 }
+
+func TestAPRSMicEDecode(t *testing.T) {
+	// 1. RS0ISS Kenwood D710GA Mic-E status beacon (0P0PS5 unconfigured GPS)
+	issPayload := "'v&\x1cl \x1cSI]ARISS-International Space Station=\r"
+	issFrame := buildTestAX25Frame("RS0ISS", "0P0PS5", []string{"APRSAT"}, issPayload)
+	pkt, err := ParseAX25Frame(issFrame[:len(issFrame)-2])
+	if err != nil {
+		t.Fatalf("ParseAX25Frame failed on RS0ISS Mic-E frame: %v", err)
+	}
+	if pkt.SourceCall != "RS0ISS" {
+		t.Errorf("Expected SourceCall RS0ISS, got %s", pkt.SourceCall)
+	}
+	if pkt.DestCall != "0P0PS5" {
+		t.Errorf("Expected DestCall 0P0PS5, got %s", pkt.DestCall)
+	}
+	if pkt.PayloadType != "status" {
+		t.Errorf("Expected PayloadType status for 0P0PS5 unconfigured GPS, got %s", pkt.PayloadType)
+	}
+	if pkt.HasLocation {
+		t.Errorf("Expected HasLocation false for 0P0PS5 unconfigured GPS")
+	}
+	if pkt.Comment != "ARISS-International Space Station" {
+		t.Errorf("Expected Comment 'ARISS-International Space Station', got %q", pkt.Comment)
+	}
+
+	// 2. Standard Mic-E position packet (Tokyo ~35°41.22'N, 139°41.30'E)
+	// Lat: 3541.22N -> 'S'(3), '5'(5), 'T'(4), 'Q'(1, N), 'R'(2, +100 lon), '2'(2, E) -> "S5TQR2"
+	// Lon: 139 deg -> 139 - 100 + 28 = 67 ('C'), 41 min -> 41 + 28 = 69 ('E'), .30 -> 30 + 28 = 58 (':')
+	posPayload := "`CE:\x1c\x1c\x1c>/]Tokyo Mobile="
+	posFrame := buildTestAX25Frame("JA1XYZ-9", "S5TQR2", []string{"RS0ISS*"}, posPayload)
+	posPkt, err := ParseAX25Frame(posFrame[:len(posFrame)-2])
+	if err != nil {
+		t.Fatalf("ParseAX25Frame failed on Mic-E position frame: %v", err)
+	}
+	if !posPkt.HasLocation {
+		t.Fatalf("Expected HasLocation true for Mic-E position frame")
+	}
+	if math.Abs(posPkt.Latitude-35.687) > 0.01 {
+		t.Errorf("Expected Latitude ~35.687, got %f", posPkt.Latitude)
+	}
+	if math.Abs(posPkt.Longitude-139.688) > 0.01 {
+		t.Errorf("Expected Longitude ~139.688, got %f", posPkt.Longitude)
+	}
+	if posPkt.Comment != "Tokyo Mobile" {
+		t.Errorf("Expected Comment 'Tokyo Mobile', got %q", posPkt.Comment)
+	}
+}
+

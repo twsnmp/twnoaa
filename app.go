@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -50,13 +51,41 @@ func NewApp(version, commit string) *App {
 
 	v := resolveAppVersion(version, commit)
 
+	recent := make([]decoder.APRSPacket, 0)
+	if st != nil {
+		records := st.GetRecords()
+		for i := len(records) - 1; i >= 0; i-- {
+			for _, p := range records[i].APRSPackets {
+				recent = append(recent, decoder.APRSPacket{
+					Timestamp:   p.Timestamp,
+					SourceCall:  p.SourceCall,
+					DestCall:    p.DestCall,
+					Path:        p.Path,
+					PathDisplay: p.PathDisplay,
+					PayloadType: p.PayloadType,
+					HasLocation: p.HasLocation,
+					Latitude:    p.Latitude,
+					Longitude:   p.Longitude,
+					Comment:     p.Comment,
+					Message:     p.Message,
+					RawPayload:  p.RawPayload,
+					RawTNC:      p.RawTNC,
+					RSSI:        p.RSSI,
+				})
+			}
+		}
+		if len(recent) > 200 {
+			recent = recent[len(recent)-200:]
+		}
+	}
+
 	return &App{
 		store:          st,
 		tracker:        tr,
 		sdrService:     sd,
 		recordedPasses: make(map[string]time.Time),
 		version:        v,
-		recentPackets:  make([]decoder.APRSPacket, 0),
+		recentPackets:  recent,
 	}
 }
 
@@ -484,6 +513,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		isLRPTSat := (strings.HasPrefix(upperSat, "METEOR") || strings.Contains(upperSat, "LRPT")) && !a.sdrService.IsSimulation()
 		isSSTVSat := !isAPRSSat && !isVoiceSat && !isLRPTSat && (freq == 145800000 || freq == 437550000 || strings.Contains(upperSat, "SSTV") || strings.Contains(upperSat, "SONATE") || freq >= 144000000)
 
+		dspEngine.SetNarrowband(isAPRSSat || isVoiceSat)
+
 		var aprsDec *decoder.APRSDecoder
 		var capturedPackets []datastore.APRSPacket
 		if isAPRSSat {
@@ -496,6 +527,7 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		rawIQDir := cfg.DataDir + "/raw_iq"
 		rawIQPath := ""
 		var rawIQFile *os.File
+		var rawIQWriter *bufio.Writer
 		if saveRaw {
 			_ = os.MkdirAll(rawIQDir, 0755)
 			rawIQPath = fmt.Sprintf("%s/%s_raw.iq", rawIQDir, baseName)
@@ -505,7 +537,15 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 				rawIQPath = ""
 			} else {
 				rawIQFile = f
-				defer rawIQFile.Close()
+				rawIQWriter = bufio.NewWriterSize(f, 1024*1024)
+				defer func() {
+					if rawIQWriter != nil {
+						_ = rawIQWriter.Flush()
+					}
+					if rawIQFile != nil {
+						_ = rawIQFile.Close()
+					}
+				}()
 			}
 		}
 
@@ -529,8 +569,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 				if !ok {
 					goto DONE
 				}
-				if rawIQFile != nil {
-					_, _ = rawIQFile.Write(buf)
+				if rawIQWriter != nil {
+					_, _ = rawIQWriter.Write(buf)
 				}
 
 				rssi := dsp.CalculateRSSI(buf)
@@ -599,6 +639,10 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 
 	DONE:
 		a.sdrService.Unsubscribe(sub)
+		if rawIQWriter != nil {
+			_ = rawIQWriter.Flush()
+			rawIQWriter = nil
+		}
 		if rawIQFile != nil {
 			_ = rawIQFile.Close()
 			rawIQFile = nil
@@ -1262,7 +1306,12 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 		}
 		defer f.Close()
 
+		upperBase := strings.ToUpper(base)
+		isAPRSSat := strings.Contains(upperBase, "APRS")
+		isVoiceSat := strings.Contains(upperBase, "VOICE") || strings.Contains(upperBase, "REPEATER")
+
 		dspEngine := dsp.NewDSP(cfg.SampleRate, 20800)
+		dspEngine.SetNarrowband(isAPRSSat || isVoiceSat)
 		buf := make([]byte, 1024*128)
 		var pcmSamples []float64
 
@@ -1287,7 +1336,6 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 		}
 
 		var res *decoder.DecodeResult
-		upperBase := strings.ToUpper(base)
 		freq := 137100000
 		var aprsPackets []datastore.APRSPacket
 

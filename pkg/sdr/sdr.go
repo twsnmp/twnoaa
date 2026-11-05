@@ -20,6 +20,7 @@ type DeviceInfo struct {
 
 type SDR struct {
 	mu              sync.Mutex
+	loopWg          sync.WaitGroup
 	device          *rtl.Context
 	centerFreq      int
 	sampleRate      int
@@ -129,6 +130,7 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, biasTee, forceSi
 	s.isStreaming = true
 	s.stopChan = make(chan struct{})
 
+	s.loopWg.Add(1)
 	if s.simulationMode {
 		go s.runSimulationLoop()
 	} else {
@@ -206,6 +208,13 @@ func (s *SDR) StopStream() {
 	}
 	s.isStreaming = false
 	close(s.stopChan)
+	s.mu.Unlock()
+
+	// Wait for hardware or simulation worker loop to completely exit
+	// BEFORE releasing C device context to prevent SIGSEGV in libusb/librtlsdr.
+	s.loopWg.Wait()
+
+	s.mu.Lock()
 	if s.device != nil {
 		_ = s.device.Close()
 		s.device = nil
@@ -231,8 +240,26 @@ func (s *SDR) IsSimulation() bool {
 }
 
 func (s *SDR) runHardwareLoop() {
-	bufSize := 1024 * 128
-	buf := make([]byte, bufSize)
+	defer s.loopWg.Done()
+	// Use 512 KB USB bulk transfer blocks (~126ms at 2.08 MSPS) with a pre-allocated ring buffer
+	// and asynchronous broadcast worker to minimize gap time between synchronous USB transfers.
+	const bufSize = 1024 * 512
+	const ringSize = 32
+	ring := make([][]byte, ringSize)
+	for i := 0; i < ringSize; i++ {
+		ring[i] = make([]byte, bufSize)
+	}
+	ringIdx := 0
+
+	dispatchCh := make(chan []byte, ringSize-2)
+	defer close(dispatchCh)
+
+	go func() {
+		for chunk := range dispatchCh {
+			s.broadcast(chunk)
+		}
+	}()
+
 	lastErrLog := time.Now().Add(-10 * time.Second)
 
 	for {
@@ -240,33 +267,45 @@ func (s *SDR) runHardwareLoop() {
 		case <-s.stopChan:
 			return
 		default:
-			s.mu.Lock()
-			dev := s.device
-			s.mu.Unlock()
+		}
 
-			if dev == nil {
-				time.Sleep(10 * time.Millisecond)
-				continue
+		s.mu.Lock()
+		dev := s.device
+		s.mu.Unlock()
+
+		if dev == nil {
+			return
+		}
+
+		buf := ring[ringIdx]
+		n, err := dev.ReadSync(buf, bufSize)
+		if err != nil || n == 0 {
+			// Check immediately if we were instructed to stop
+			select {
+			case <-s.stopChan:
+				return
+			default:
 			}
 
-			n, err := dev.ReadSync(buf, len(buf))
-			if err != nil || n == 0 {
-				if time.Since(lastErrLog) >= 2*time.Second {
-					logger.Warnf("SDR", "ReadSync warning (n=%d, err=%v), retrying...", n, err)
-					lastErrLog = time.Now()
-				}
-				time.Sleep(10 * time.Millisecond)
-				continue
+			if time.Since(lastErrLog) >= 2*time.Second {
+				logger.Warnf("SDR", "ReadSync warning (n=%d, err=%v), retrying...", n, err)
+				lastErrLog = time.Now()
 			}
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
 
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-			s.broadcast(chunk)
+		ringIdx = (ringIdx + 1) % ringSize
+		select {
+		case dispatchCh <- buf[:n]:
+		default:
+			logger.Warnf("SDR", "USB dispatch ring full, dropping %d bytes", n)
 		}
 	}
 }
 
 func (s *SDR) runSimulationLoop() {
+	defer s.loopWg.Done()
 	bufSize := 1024 * 128
 	buf := make([]byte, bufSize)
 	ticker := time.NewTicker(30 * time.Millisecond)
