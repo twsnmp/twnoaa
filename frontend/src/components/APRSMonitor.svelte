@@ -22,12 +22,50 @@
     )
   })
 
+  function normalizePacket(pkt) {
+    if (!pkt) return pkt
+    const p = { ...pkt }
+    // 1. Check RS0ISS dummy GPS destination (e.g. 0P0PS4, 0P0PS5)
+    if (p.source_call?.startsWith('RS0ISS') && p.dest_call?.startsWith('0P0PS')) {
+      p.payload_type = 'status'
+      p.has_location = false
+    }
+    // 2. Client-side fallback for Maidenhead grid locator (e.g. "PM95", "[PM95]")
+    if (p.payload_type === 'unknown' || !p.has_location) {
+      const text = (p.comment || p.raw_payload || '').trim()
+      const gridMatch = text.match(/^\[?([A-Ra-r]{2}[0-9]{2}(?:[A-Xa-x]{2})?)\]?(?:[\s,/-]|$)/)
+      if (gridMatch) {
+        const grid = gridMatch[1].toUpperCase()
+        const f1 = grid.charCodeAt(0) - 65
+        const f2 = grid.charCodeAt(1) - 65
+        const s1 = parseInt(grid[2], 10)
+        const s2 = parseInt(grid[3], 10)
+        let lon = f1 * 20 - 180 + s1 * 2
+        let lat = f2 * 10 - 90 + s2 * 1
+        if (grid.length === 6) {
+          const sub1 = grid.charCodeAt(4) - 65
+          const sub2 = grid.charCodeAt(5) - 65
+          lon += sub1 * (2 / 24) + (1 / 24)
+          lat += sub2 * (1 / 24) + (0.5 / 24)
+        } else {
+          lon += 1.0
+          lat += 0.5
+        }
+        p.payload_type = 'position'
+        p.has_location = true
+        p.latitude = Math.round(lat * 10000) / 10000
+        p.longitude = Math.round(lon * 10000) / 10000
+      }
+    }
+    return p
+  }
+
   async function loadPackets() {
     try {
       if (window.go?.main?.App?.GetRecentAPRSPackets) {
         const pkts = await window.go.main.App.GetRecentAPRSPackets()
         if (Array.isArray(pkts)) {
-          packets = pkts.reverse() // Newest first
+          packets = pkts.map(normalizePacket).reverse() // Newest first
         }
       }
     } catch (e) {
@@ -47,10 +85,36 @@
     }
   }
 
+  function formatDate(ts) {
+    if (!ts) return ''
+    const d = new Date(ts)
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}/${month}/${day}`
+  }
+
   function formatTime(ts) {
     if (!ts) return ''
     const d = new Date(ts)
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  function formatDateTime(ts) {
+    if (!ts) return ''
+    const d = new Date(ts)
+    const date = formatDate(ts)
+    const time = formatTime(ts)
+    return `${date} ${time}`
+  }
+
+  function openExternalMap(lat, lon) {
+    const url = `https://www.google.com/maps?q=${lat},${lon}`
+    if (window.runtime?.BrowserOpenURL) {
+      window.runtime.BrowserOpenURL(url)
+    } else {
+      window.open(url, '_blank')
+    }
   }
 
   onMount(() => {
@@ -59,7 +123,7 @@
     if (window.runtime?.EventsOn) {
       cancelEvent = window.runtime.EventsOn('aprs_packet', (pkt) => {
         if (pkt) {
-          packets = [pkt, ...packets]
+          packets = [normalizePacket(pkt), ...packets]
         }
       })
     }
@@ -147,7 +211,7 @@
           <div class="p-3 font-mono text-xs space-y-1 bg-black/40 text-amber-200/90 select-text">
             {#each filteredPackets as pkt}
               <div class="p-1.5 rounded hover:bg-white/5 cursor-pointer flex items-start gap-2 border-b border-slate-900">
-                <span class="text-slate-500 shrink-0 font-normal">[{formatTime(pkt.timestamp)}]</span>
+                <span class="text-slate-500 shrink-0 font-normal">[{formatDateTime(pkt.timestamp)}]</span>
                 <span class="font-bold text-amber-400 shrink-0">{pkt.source_call}</span>
                 <span class="text-slate-400">&gt;</span>
                 <span class="text-cyan-400 shrink-0">{pkt.dest_call}{pkt.path_display ? ',' + pkt.path_display : ''}:</span>
@@ -160,7 +224,7 @@
           <table class="w-full text-left text-xs">
             <thead class="bg-slate-950/60 text-slate-400 font-semibold border-b border-slate-800/80 sticky top-0">
               <tr>
-                <th class="py-2.5 px-3">時刻</th>
+                <th class="py-2.5 px-3">日時</th>
                 <th class="py-2.5 px-3">送信元</th>
                 <th class="py-2.5 px-3">中継経路</th>
                 <th class="py-2.5 px-3">タイプ</th>
@@ -175,8 +239,9 @@
                   onclick={() => selectedPacket = pkt}
                   class="hover:bg-slate-800/50 cursor-pointer transition-colors {selectedPacket === pkt ? 'bg-amber-500/10' : ''}"
                 >
-                  <td class="py-2.5 px-3 font-mono text-slate-400 shrink-0">
-                    {formatTime(pkt.timestamp)}
+                  <td class="py-2.5 px-3 font-mono text-slate-400 shrink-0 whitespace-nowrap" title={formatDateTime(pkt.timestamp)}>
+                    <div class="text-slate-300 text-[11px] leading-tight">{formatDate(pkt.timestamp)}</div>
+                    <div class="text-slate-500 text-[11px] leading-tight mt-0.5">{formatTime(pkt.timestamp)}</div>
                   </td>
                   <td class="py-2.5 px-3 font-bold font-mono text-amber-400">
                     {pkt.source_call}
@@ -198,6 +263,18 @@
                     {:else if pkt.payload_type === 'status'}
                       <span class="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold">
                         ステータス
+                      </span>
+                    {:else if pkt.payload_type === 'telemetry'}
+                      <span class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
+                        テレメトリ
+                      </span>
+                    {:else if pkt.payload_type === 'weather'}
+                      <span class="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold">
+                        気象
+                      </span>
+                    {:else if pkt.payload_type === 'query'}
+                      <span class="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/30 text-[10px] font-bold">
+                        クエリ
                       </span>
                     {:else}
                       <span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[10px]">
@@ -249,6 +326,24 @@
 
         <div class="space-y-2.5 text-xs">
           <div>
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">受信日時</span>
+            <span class="text-xs font-mono text-slate-200 block">{formatDateTime(selectedPacket.timestamp)}</span>
+          </div>
+
+          <div>
+            <span class="text-[10px] text-slate-400 uppercase font-semibold block">種別 (タイプ)</span>
+            <span class="text-xs font-mono font-semibold block text-slate-200">
+              {selectedPacket.payload_type === 'position' ? '位置情報 (Position / Grid)' :
+               selectedPacket.payload_type === 'status' ? 'ステータス (Status)' :
+               selectedPacket.payload_type === 'message' ? 'メッセージ (Message)' :
+               selectedPacket.payload_type === 'telemetry' ? 'テレメトリ (Telemetry)' :
+               selectedPacket.payload_type === 'weather' ? '気象データ (Weather)' :
+               selectedPacket.payload_type === 'query' ? 'クエリ (Query)' :
+               selectedPacket.payload_type}
+            </span>
+          </div>
+
+          <div>
             <span class="text-[10px] text-slate-400 uppercase font-semibold block">送信元コールサイン</span>
             <span class="text-base font-bold font-mono text-amber-400">{selectedPacket.source_call}</span>
           </div>
@@ -263,18 +358,18 @@
             <div class="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 space-y-1">
               <span class="text-[10px] text-emerald-400 uppercase font-bold flex items-center gap-1">
                 <MapPin class="w-3.5 h-3.5" />
-                位置座標 (GPS)
+                位置座標 (GPS / グリッド)
               </span>
               <div class="font-mono text-emerald-200 text-sm font-bold">
                 {selectedPacket.latitude.toFixed(4)}°N, {selectedPacket.longitude.toFixed(4)}°E
               </div>
-              <a
-                href="https://www.google.com/maps?q={selectedPacket.latitude},{selectedPacket.longitude}"
-                target="_blank"
-                class="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-semibold"
+              <button
+                type="button"
+                onclick={() => openExternalMap(selectedPacket.latitude, selectedPacket.longitude)}
+                class="text-[11px] text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-1 mt-1 font-semibold cursor-pointer text-left"
               >
                 Google Maps で開く <ExternalLink class="w-3 h-3" />
-              </a>
+              </button>
             </div>
           {/if}
 

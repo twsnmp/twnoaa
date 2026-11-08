@@ -809,6 +809,11 @@ func parseAPRSData(pkt *APRSPacket, payloadBytes []byte) {
 	firstByte := payloadBytes[0]
 	payload := string(payloadBytes)
 
+	// First, check for APRS Maidenhead Grid Locator Beacon: "[PM95]" or plain "PM95"
+	if tryParseGridLocator(pkt, payload) {
+		return
+	}
+
 	switch firstByte {
 	case '!', '=': // Position without timestamp
 		pkt.PayloadType = "position"
@@ -835,16 +840,153 @@ func parseAPRSData(pkt *APRSPacket, payloadBytes []byte) {
 	case '>': // Status
 		pkt.PayloadType = "status"
 		pkt.Comment = strings.TrimSpace(payload[1:])
+	case '?': // APRS Query
+		pkt.PayloadType = "query"
+		pkt.Comment = strings.TrimSpace(payload[1:])
+	case '<': // Station Capabilities
+		pkt.PayloadType = "status"
+		pkt.Comment = strings.TrimSpace(payload[1:])
+	case ';': // APRS Object
+		pkt.PayloadType = "object"
+		if len(payload) > 18 {
+			parsePosition(pkt, payload[18:])
+		} else {
+			pkt.Comment = payload[1:]
+		}
+	case ')': // APRS Item
+		pkt.PayloadType = "item"
+		pkt.Comment = strings.TrimSpace(payload[1:])
+	case '_', '#', '*': // Weather report
+		pkt.PayloadType = "weather"
+		pkt.Comment = payload
 	case 'T': // Telemetry
 		if strings.HasPrefix(payload, "T#") {
 			pkt.PayloadType = "telemetry"
 			pkt.Comment = payload
 		} else {
+			pkt.PayloadType = "status"
 			pkt.Comment = payload
 		}
 	default:
-		pkt.Comment = pkt.RawPayload
+		// Fallback for general AX.25 UI unproto frames / beacon text without specific APRS DTI
+		if len(strings.TrimSpace(pkt.RawPayload)) > 0 {
+			pkt.PayloadType = "status"
+			pkt.Comment = pkt.RawPayload
+		} else {
+			pkt.Comment = pkt.RawPayload
+		}
 	}
+}
+
+// tryParseGridLocator checks if the payload is a Maidenhead Grid Locator (e.g. "[PM95]", "[PM95aa]", or plain "PM95")
+func tryParseGridLocator(pkt *APRSPacket, s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 4 {
+		return false
+	}
+
+	var gridCandidate string
+	var comment string
+
+	// Case 1: Standard APRS Grid Locator Beacon: "[PM95]" or "[PM95] comment"
+	if s[0] == '[' {
+		closeIdx := strings.IndexByte(s, ']')
+		if closeIdx >= 5 { // e.g. [PM95] -> len 6, idx 5
+			gridCandidate = s[1:closeIdx]
+			comment = strings.TrimSpace(s[closeIdx+1:])
+		}
+	} else {
+		// Case 2: Plain Maidenhead Grid Locator: "PM95", "PM95aa", "PM95 / 73 via ISS", "PM95, Tokyo"
+		// Check for 6-character grid first
+		if len(s) >= 6 && isMaidenheadGrid(s[:6]) && (len(s) == 6 || isGridSeparator(s[6])) {
+			gridCandidate = s[:6]
+			comment = strings.TrimSpace(s[6:])
+		} else if len(s) >= 4 && isMaidenheadGrid(s[:4]) && (len(s) == 4 || isGridSeparator(s[4])) {
+			gridCandidate = s[:4]
+			comment = strings.TrimSpace(s[4:])
+		}
+	}
+
+	if gridCandidate == "" {
+		return false
+	}
+
+	lat, lon, ok := parseMaidenheadGrid(gridCandidate)
+	if !ok {
+		return false
+	}
+
+	pkt.PayloadType = "position"
+	pkt.HasLocation = true
+	pkt.Latitude = lat
+	pkt.Longitude = lon
+	if comment != "" {
+		comment = strings.TrimPrefix(comment, ",")
+		comment = strings.TrimPrefix(comment, "/")
+		comment = strings.TrimSpace(comment)
+		if comment != "" {
+			pkt.Comment = fmt.Sprintf("[%s] %s", strings.ToUpper(gridCandidate), comment)
+		} else {
+			pkt.Comment = strings.ToUpper(gridCandidate)
+		}
+	} else {
+		pkt.Comment = strings.ToUpper(gridCandidate)
+	}
+	return true
+}
+
+func isGridSeparator(c byte) bool {
+	return c == ' ' || c == ',' || c == '/' || c == '-' || c == ';' || c == ':' || c == '.'
+}
+
+func isMaidenheadGrid(s string) bool {
+	if len(s) != 4 && len(s) != 6 {
+		return false
+	}
+	f1 := strings.ToUpper(string(s[0]))[0]
+	f2 := strings.ToUpper(string(s[1]))[0]
+	if f1 < 'A' || f1 > 'R' || f2 < 'A' || f2 > 'R' {
+		return false
+	}
+	if s[2] < '0' || s[2] > '9' || s[3] < '0' || s[3] > '9' {
+		return false
+	}
+	if len(s) == 6 {
+		sub1 := strings.ToUpper(string(s[4]))[0]
+		sub2 := strings.ToUpper(string(s[5]))[0]
+		if sub1 < 'A' || sub1 > 'X' || sub2 < 'A' || sub2 > 'X' {
+			return false
+		}
+	}
+	return true
+}
+
+// parseMaidenheadGrid converts a 4- or 6-character Maidenhead grid locator to latitude & longitude (grid center)
+func parseMaidenheadGrid(grid string) (lat, lon float64, ok bool) {
+	if !isMaidenheadGrid(grid) {
+		return 0, 0, false
+	}
+
+	f1 := strings.ToUpper(string(grid[0]))[0]
+	f2 := strings.ToUpper(string(grid[1]))[0]
+	s1 := grid[2]
+	s2 := grid[3]
+
+	lonDeg := float64(f1-'A')*20.0 - 180.0 + float64(s1-'0')*2.0
+	latDeg := float64(f2-'A')*10.0 - 90.0 + float64(s2-'0')*1.0
+
+	if len(grid) == 6 {
+		sub1 := strings.ToUpper(string(grid[4]))[0]
+		sub2 := strings.ToUpper(string(grid[5]))[0]
+		lonDeg += float64(sub1-'A')*(2.0/24.0) + (1.0 / 24.0)
+		latDeg += float64(sub2-'A')*(1.0/24.0) + (0.5 / 24.0)
+	} else {
+		// 4-character center: +1.0 lon, +0.5 lat
+		lonDeg += 1.0
+		latDeg += 0.5
+	}
+
+	return math.Round(latDeg*10000) / 10000, math.Round(lonDeg*10000) / 10000, true
 }
 
 // parseMicE decodes APRS Mic-E compressed position and status packets (APRS 1.0.1 Spec Chapter 10)
@@ -873,10 +1015,10 @@ func parseMicE(pkt *APRSPacket, info []byte) {
 		dest = dest[:idx]
 	}
 
-	// Note: The ISS Zvezda Kenwood TM-D710GA (RS0ISS) has no GPS receiver attached in orbit
-	// and transmits the hardcoded default dummy Mic-E destination "0P0PS5" (00°00.35'N, 008°10.00'E).
+	// Note: The ISS Zvezda Kenwood TM-D710GA (RS0ISS/NA1SS) has no GPS receiver attached in orbit
+	// and transmits hardcoded default dummy Mic-E destinations like "0P0PS4", "0P0PS5" (~00°00'N, 008°10'E).
 	// Classify that unconfigured GPS beacon as a "status" packet rather than plotting a dummy coordinate in Africa.
-	if dest == "0P0PS5" && (strings.HasPrefix(pkt.SourceCall, "RS0ISS") || strings.HasPrefix(pkt.SourceCall, "NA1SS")) {
+	if strings.HasPrefix(dest, "0P0PS") && (strings.HasPrefix(pkt.SourceCall, "RS0ISS") || strings.HasPrefix(pkt.SourceCall, "NA1SS")) {
 		pkt.PayloadType = "status"
 		pkt.HasLocation = false
 		return
@@ -1003,4 +1145,37 @@ func DecodeAPRSWAVFile(wavPath string) ([]*APRSPacket, error) {
 	decoder := NewAPRSDecoder(sampleRate)
 	packets := decoder.DecodeSamples(samples)
 	return packets, nil
+}
+
+// ReParsePacket re-evaluates an existing packet using the latest APRS parsing rules.
+// This upgrades older stored packets (e.g. previously unknown grid locators like "PM95",
+// or ISS Mic-E dummy GPS destinations like "0P0PS4").
+func ReParsePacket(pkt *APRSPacket) {
+	if pkt == nil {
+		return
+	}
+
+	// 1. Check for RS0ISS / NA1SS unconfigured dummy GPS Mic-E packets
+	dest := pkt.DestCall
+	if idx := strings.IndexByte(dest, '-'); idx >= 0 {
+		dest = dest[:idx]
+	}
+	if strings.HasPrefix(dest, "0P0PS") && (strings.HasPrefix(pkt.SourceCall, "RS0ISS") || strings.HasPrefix(pkt.SourceCall, "NA1SS")) {
+		pkt.PayloadType = "status"
+		pkt.HasLocation = false
+		pkt.Latitude = 0
+		pkt.Longitude = 0
+		return
+	}
+
+	// 2. If it was unknown, or has a grid locator in comment/raw payload
+	if pkt.PayloadType == "unknown" || !pkt.HasLocation {
+		raw := pkt.RawPayload
+		if raw == "" {
+			raw = pkt.Comment
+		}
+		if raw != "" {
+			parseAPRSData(pkt, []byte(raw))
+		}
+	}
 }

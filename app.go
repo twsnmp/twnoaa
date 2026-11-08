@@ -56,7 +56,7 @@ func NewApp(version, commit string) *App {
 		records := st.GetRecords()
 		for i := len(records) - 1; i >= 0; i-- {
 			for _, p := range records[i].APRSPackets {
-				recent = append(recent, decoder.APRSPacket{
+				item := decoder.APRSPacket{
 					Timestamp:   p.Timestamp,
 					SourceCall:  p.SourceCall,
 					DestCall:    p.DestCall,
@@ -71,7 +71,9 @@ func NewApp(version, commit string) *App {
 					RawPayload:  p.RawPayload,
 					RawTNC:      p.RawTNC,
 					RSSI:        p.RSSI,
-				})
+				}
+				decoder.ReParsePacket(&item)
+				recent = append(recent, item)
 			}
 		}
 		if len(recent) > 200 {
@@ -92,6 +94,7 @@ func NewApp(version, commit string) *App {
 func (a *App) addRecentPacket(pkt decoder.APRSPacket) {
 	a.packetMu.Lock()
 	defer a.packetMu.Unlock()
+	decoder.ReParsePacket(&pkt)
 	a.recentPackets = append(a.recentPackets, pkt)
 	if len(a.recentPackets) > 200 {
 		a.recentPackets = a.recentPackets[len(a.recentPackets)-200:]
@@ -100,8 +103,11 @@ func (a *App) addRecentPacket(pkt decoder.APRSPacket) {
 
 // GetRecentAPRSPackets returns the list of in-memory APRS packets received
 func (a *App) GetRecentAPRSPackets() []decoder.APRSPacket {
-	a.packetMu.RLock()
-	defer a.packetMu.RUnlock()
+	a.packetMu.Lock()
+	defer a.packetMu.Unlock()
+	for i := range a.recentPackets {
+		decoder.ReParsePacket(&a.recentPackets[i])
+	}
 	res := make([]decoder.APRSPacket, len(a.recentPackets))
 	copy(res, a.recentPackets)
 	return res

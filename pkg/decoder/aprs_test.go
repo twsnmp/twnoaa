@@ -3,6 +3,7 @@ package decoder
 import (
 	"encoding/binary"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -14,15 +15,8 @@ func encodeCall(call string, isLast bool) []byte {
 	base := strings.ToUpper(parts[0])
 	ssid := 0
 	if len(parts) > 1 {
-		switch parts[1] {
-		case "1":
-			ssid = 1
-		case "2":
-			ssid = 2
-		case "9":
-			ssid = 9
-		case "11":
-			ssid = 11
+		if s, err := strconv.Atoi(parts[1]); err == nil && s >= 0 && s <= 15 {
+			ssid = s
 		}
 	}
 
@@ -284,6 +278,103 @@ func TestAPRSMicEDecode(t *testing.T) {
 	}
 	if posPkt.Comment != "Tokyo Mobile" {
 		t.Errorf("Expected Comment 'Tokyo Mobile', got %q", posPkt.Comment)
+	}
+}
+
+func TestAPRSGridLocatorDecode(t *testing.T) {
+	// 1. Plain grid locator "PM95" (as seen in JF1PTU-6 ISS digipeater packet)
+	frame1 := buildTestAX25Frame("JF1PTU-6", "APRS", []string{"RS0ISS*"}, "PM95")
+	pkt1, err := ParseAX25Frame(frame1[:len(frame1)-2])
+	if err != nil {
+		t.Fatalf("ParseAX25Frame failed: %v", err)
+	}
+	if pkt1.SourceCall != "JF1PTU-6" {
+		t.Errorf("Expected SourceCall JF1PTU-6, got %s", pkt1.SourceCall)
+	}
+	if pkt1.PayloadType != "position" {
+		t.Errorf("Expected PayloadType position for grid locator, got %s", pkt1.PayloadType)
+	}
+	if !pkt1.HasLocation {
+		t.Fatalf("Expected HasLocation true for grid locator")
+	}
+	if math.Abs(pkt1.Latitude-35.5) > 0.001 {
+		t.Errorf("Expected Latitude 35.5, got %f", pkt1.Latitude)
+	}
+	if math.Abs(pkt1.Longitude-139.0) > 0.001 {
+		t.Errorf("Expected Longitude 139.0, got %f", pkt1.Longitude)
+	}
+	if pkt1.Comment != "PM95" {
+		t.Errorf("Expected Comment 'PM95', got %q", pkt1.Comment)
+	}
+
+	// 2. Bracketed APRS grid beacon "[PM95] Tokyo Sat"
+	frame2 := buildTestAX25Frame("JA1ABC", "APRS", []string{"ARISS"}, "[PM95] Tokyo Sat")
+	pkt2, err := ParseAX25Frame(frame2[:len(frame2)-2])
+	if err != nil {
+		t.Fatalf("ParseAX25Frame failed: %v", err)
+	}
+	if pkt2.PayloadType != "position" {
+		t.Errorf("Expected PayloadType position, got %s", pkt2.PayloadType)
+	}
+	if !pkt2.HasLocation {
+		t.Fatalf("Expected HasLocation true")
+	}
+	if !strings.Contains(pkt2.Comment, "Tokyo Sat") {
+		t.Errorf("Expected Comment to contain Tokyo Sat, got %q", pkt2.Comment)
+	}
+
+	// 3. Fallback unproto general text (not grid locator)
+	frame3 := buildTestAX25Frame("JH1XYZ", "CQ", []string{"RS0ISS*"}, "Hello from Yokohama")
+	pkt3, err := ParseAX25Frame(frame3[:len(frame3)-2])
+	if err != nil {
+		t.Fatalf("ParseAX25Frame failed: %v", err)
+	}
+	if pkt3.PayloadType != "status" {
+		t.Errorf("Expected PayloadType status fallback, got %s", pkt3.PayloadType)
+	}
+	if pkt3.Comment != "Hello from Yokohama" {
+		t.Errorf("Expected Comment 'Hello from Yokohama', got %q", pkt3.Comment)
+	}
+}
+
+func TestReParsePacket(t *testing.T) {
+	// 1. Upgrades stored "unknown" packet with "PM95" payload to "position"
+	pktUnknown := &APRSPacket{
+		SourceCall:  "JF1PTU-6",
+		DestCall:    "APRS",
+		PathDisplay: "RS0ISS*",
+		PayloadType: "unknown",
+		Comment:     "PM95",
+		RawPayload:  "PM95",
+	}
+	ReParsePacket(pktUnknown)
+	if pktUnknown.PayloadType != "position" {
+		t.Errorf("Expected PayloadType position, got %s", pktUnknown.PayloadType)
+	}
+	if !pktUnknown.HasLocation {
+		t.Fatalf("Expected HasLocation true")
+	}
+	if math.Abs(pktUnknown.Latitude-35.5) > 0.001 || math.Abs(pktUnknown.Longitude-139.0) > 0.001 {
+		t.Errorf("Expected (35.5, 139.0), got (%f, %f)", pktUnknown.Latitude, pktUnknown.Longitude)
+	}
+
+	// 2. Corrects stored RS0ISS dummy GPS Mic-E (0P0PS4) to "status" without location
+	pktIssDummy := &APRSPacket{
+		SourceCall:  "RS0ISS",
+		DestCall:    "0P0PS4",
+		PathDisplay: "APRSAT",
+		PayloadType: "position",
+		HasLocation: true,
+		Latitude:    0.0057,
+		Longitude:   0.1667,
+		Comment:     "ARISS-International Space Station",
+	}
+	ReParsePacket(pktIssDummy)
+	if pktIssDummy.PayloadType != "status" {
+		t.Errorf("Expected PayloadType status, got %s", pktIssDummy.PayloadType)
+	}
+	if pktIssDummy.HasLocation {
+		t.Errorf("Expected HasLocation false for RS0ISS dummy 0P0PS4 packet")
 	}
 }
 
