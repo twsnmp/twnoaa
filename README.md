@@ -120,6 +120,8 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 - **3D Satellite Orbit Watch**:
   - Interactive 3D Earth globe visualizer rendering real-time satellite positions and orbital flight paths for all active weather satellites.
   - Draws a live vector beam from your ground station to in-range satellites, helping you visualize the arrival vector of the incoming RF signal.
+- **3D APRS Ground Station Mapping**:
+  - Automatically extracts geographic coordinates from received APRS packets and plots active ground stations and beacons directly onto the 3D globe surface with real-time station counts.
 - **Satellite Telemetry Card**:
   - Selecting a satellite displays its center frequency, real-time elevation, azimuth, Doppler frequency shift, sub-satellite coordinates (latitude/longitude), and flight altitude (Alt).
   - Status indicators show "STANDBY / MONITORING" or incoming pass alerts, with a "Tune & Receive Now" shortcut button to jump straight into reception.
@@ -160,6 +162,9 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 - **High-Definition Image Viewer**:
   - Displays rendered multispectral and visible/IR satellite images. Clicking the preview launches a center-locked zoom & pan viewer for inspecting cloud vortices, frontal boundaries, and coastlines.
   - Multi-tab visualization modes: "APT Image", "Signal Graph", "Multi-Pass Compare", "APT Audio", and "FFT Spectrum".
+- **FM Voice Audio Playback & Per-Pass APRS Packet Log**:
+  - Play back demodulated WAV audio for non-image transmissions, such as ISS cross-band FM repeater passes, directly within the UI.
+  - Inspect the full list of APRS packets received and decoded during each specific satellite pass session.
 - **Offline Processing & AI Handoff**:
   - Re-demodulate and re-decode historical raw signals offline via "Decode from Raw IQ File" or "Decode from WAV File (Test)".
   - One-click "Analyze with AI" sends the satellite image and pass telemetry directly to multimodal LLMs.
