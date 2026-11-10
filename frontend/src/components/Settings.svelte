@@ -32,7 +32,7 @@
   let isLoadingStorage = $state(false)
   let showDeleteAllModal = $state(false)
   let isDeletingAllRaw = $state(false)
-  let appVersion = $state('v0.1.0')
+  let appVersion = $state('v0.2.0')
 
   async function loadVersion() {
     try {

@@ -40,10 +40,10 @@ func TestAppVersion(t *testing.T) {
 func TestResolveAppVersionFallback(t *testing.T) {
 	// When version is empty or default and commit is unknown (like running `wails dev` directly),
 	// it should fall back to git/buildinfo and resolve commit.
-	app := NewApp("v0.1.0", "unknown")
+	app := NewApp("v0.2.0", "unknown")
 	got := app.GetVersion()
 
-	// It should look like "v0.1.0(d3f8249)" or similar containing parentheses
+	// It should look like "v0.2.0(d3f8249)" or similar containing parentheses
 	if !strings.Contains(got, "(") || !strings.Contains(got, ")") {
 		t.Errorf("Expected fallback commit resolution in git repository, got %q", got)
 	}

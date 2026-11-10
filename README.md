@@ -21,8 +21,9 @@
 - 🧪 **Built-in Simulation Mode** — Full workflow verification (synthetic signal generation, DSP demodulation, APT image synthesis, AI analysis) even without physical SDR hardware connected.
 - 🖼️ **Multi-Protocol Satellite Decoders**
   - **NOAA APT**: FM demodulation, 2400 Hz AM subcarrier sync frame cross-correlation, dual-channel (Visible & Thermal IR) high-resolution image rendering.
-  - **METEOR-M2 LRPT**: QPSK demodulation, Costas loop carrier recovery, RRC matched filtering, Viterbi & Reed-Solomon error correction for high-resolution multispectral imagery.
+  - **METEOR-M2 LRPT**: QPSK demodulation, Costas loop carrier recovery, RRC matched filtering, Viterbi & Reed-Solomon error correction for high-resolution multispectral imagery (with resilient timestamp outlier handling & automatic clock fallback).
   - **SSTV**: ISS (International Space Station) and amateur radio space image decoding (Martin, Scottie, and other modes).
+- 📡 **ISS APRS Packet Telemetry & Real-Time Monitor** — Dual-branch demodulation of 1200 bps AFSK / AX.25 packets from the International Space Station (ARISS), featuring live callsign tracking, Maidenhead Grid Locator resolution, and one-click Google Maps / aprs.fi integration.
 - 🤖 **AI Meteorological Insights & Cat Animation** — Passes newly decoded satellite images and reception metadata to Multimodal LLMs (Google Gemini, OpenAI, Anthropic, or local Ollama) to produce weather front, cyclone vortex, and cloud pattern analysis, accompanied by a delightful animated cat character during reasoning.
 - 📼 **Raw I/Q Data Recording & Replay** — Capture live raw RF signals to disk and replay them anytime with different filter parameters or decoder algorithms.
 - 💾 **Local-First Persistent Storage** — Embedded bbolt key-value database securely stores all pass records, decoded images, and AI reports completely on your local machine.
@@ -138,7 +139,19 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 - **Real-Time FFT Spectrum & Waterfall**:
   - Overlaid satellite frequency markers (METEOR-M2 3/4, NOAA 15/18/19, etc.) for visual Doppler monitoring and signal lock.
 
-### 4. Satellite Image Gallery (Image Gallery)
+### 4. APRS Packet Monitor (APRS)
+![APRS Monitor](images/screen_aprs_en.png)
+
+- **Real-Time APRS Packet Stream**:
+  - Decodes and logs incoming AX.25 1200 bps AFSK packets from the International Space Station (ARISS: 437.825 MHz / 145.825 MHz) and other satellites.
+  - Displays sender callsign (From), destination / digipeater path (To / Path), symbol icon, decoded message payload, timestamp, and signal level (RSSI).
+- **Maidenhead Grid Locator Parsing & Map Links**:
+  - Automatically parses Maidenhead grid locators (e.g. `PM96`) embedded in packet payloads into latitude/longitude coordinates.
+  - Includes a direct "Map" button to open the sending station's geographic position on Google Maps or aprs.fi in your browser.
+- **Search Filtering & Clean Interface**:
+  - Incremental text filtering by callsign or content, auto-scroll toggle, and one-click log clearing.
+
+### 5. Satellite Image Gallery (Image Gallery)
 ![Image Gallery](images/screen_gallery_en.png)
 
 - **Decoded Pass History & Filters**:
@@ -151,7 +164,7 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - Re-demodulate and re-decode historical raw signals offline via "Decode from Raw IQ File" or "Decode from WAV File (Test)".
   - One-click "Analyze with AI" sends the satellite image and pass telemetry directly to multimodal LLMs.
 
-### 5. AI Meteorological Analysis (AI Analysis)
+### 6. AI Meteorological Analysis (AI Analysis)
 ![AI Analysis](images/screen_ai_en.png)
 
 - **Multi-LLM Weather Analysis Engine**:
@@ -163,14 +176,17 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
     - **Channel Analysis**: Visible light reflectivity, cloud top temperatures, synoptic weather fronts, cyclonic vortex rotation, and typhoon structures.
   - "Copy Report" button copies the formatted markdown report directly to your clipboard with one click.
 
-### 6. Settings
+### 7. Settings
 ![Settings](images/screen_settings_en.png)
 
+- **Modern 2×2 Grid Layout**:
+  - Application info, Ground Station coordinates, SDR Receiver settings, and AI/LLM providers organized in a clean 4-quadrant layout.
 - **Observer Location Coordinates**:
   - Ground station label, latitude (°N), longitude (°E), and altitude (km).
   - One-click "autoLocation" button automatically detects station coordinates from IP address.
 - **SDR Receiver Configuration (`sdrConfig`)**:
   - **Auto-record Satellite Passes**: Automatically triggers SDR tuning, reception, recording, and decoding when satellite elevation reaches 5° or higher.
+  - **ISS Pass Mode**: Choose auto-record preference when the ISS passes overhead (APRS, SSTV, or Voice).
   - **Bias-T (4.5V Coaxial Power)**: Supplies 4.5V DC power via antenna coaxial cable to power active LNAs like Nooelec SAWbird+ (RTL-SDR Blog V3/V4).
   - **Auto Record Duration & Gain Settings**: Configure pass duration in seconds, manual gain, or Auto Tuner Gain (AGC).
   - **Save Raw IQ Stream Data (`.iq`) & Storage**: Real-time display of total saved raw signal storage space and file count, with a "Delete All Raw IQ Data" button for easy maintenance.
@@ -232,7 +248,7 @@ When a satellite pass is completed and the image is decoded, the metadata (Satel
 
 Visit the [Releases](https://github.com/twsnmp/twnoaa/releases) page to get binaries for your operating system:
 
-- **macOS (Apple Silicon)**: Download `twnoaa-v0.1.0-darwin-arm64.pkg` and run the signed installer (notarized by Apple).
+- **macOS (Apple Silicon)**: Download `twnoaa-v0.2.0-darwin-arm64.pkg` and run the signed installer (notarized by Apple; bundles `librtlsdr` and `libusb` dynamic libraries so no separate installation is required).
 - **Windows (x64)**: Download `twnoaa-windows-amd64.zip`, extract to any directory, and run `twnoaa.exe` (includes required `rtlsdr.dll`).
 - **Linux (x64)**: Download `twnoaa-linux-amd64.tar.gz`, extract and run (requires `librtlsdr0`, `libwebkit2gtk-4.1-0`).
 

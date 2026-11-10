@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag (e.g. v0.1.0)'
+        description: 'Release Tag (e.g. v0.2.0)'
         required: true
-        default: 'v0.1.0'
+        default: 'v0.2.0'
         type: string
 
 permissions:
@@ -106,7 +106,7 @@ jobs:
           if [ -n "$TAG" ]; then
             VERSION="$TAG"
           else
-            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.2.0")
           fi
           COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
           BUILD_VERSION="${VERSION}(${COMMIT})"
@@ -122,7 +122,7 @@ jobs:
             $version = $tag
           } else {
             $version = git describe --tags --abbrev=0 2>$null
-            if (-not $version) { $version = "v0.1.0" }
+            if (-not $version) { $version = "v0.2.0" }
           }
           $commit = git rev-parse --short HEAD 2>$null
           if (-not $commit) { $commit = "unknown" }
@@ -190,6 +190,6 @@ jobs:
           files: release-artifacts/*
           draft: false
           prerelease: false
-          tag_name: ${{ inputs.tag_name || (github.ref_type == 'tag' && github.ref_name) || 'v0.1.0' }}
+          tag_name: ${{ inputs.tag_name || (github.ref_type == 'tag' && github.ref_name) || 'v0.2.0' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
