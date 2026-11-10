@@ -1214,9 +1214,9 @@
                     <Music class="w-10 h-10 animate-pulse" />
                   </div>
                   <div>
-                    <h4 class="text-sm font-bold text-slate-100">FM 音声通信レコード</h4>
+                    <h4 class="text-sm font-bold text-slate-100">{i18n.t('gallery.voiceRecordTitle')}</h4>
                     <p class="text-xs text-slate-400 mt-1 max-w-sm">
-                      画像デコード対象のないFM音声パスです。上の「WAVオーディオ」タブから交信録音を再生できます。
+                      {i18n.t('gallery.voiceRecordDesc')}
                     </p>
                   </div>
                   {#if selectedRecord.audio_path}
@@ -1226,7 +1226,7 @@
                       class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-2 shadow-lg transition-all"
                     >
                       <Volume2 class="w-4 h-4" />
-                      音声を再生する
+                      {i18n.t('gallery.playVoiceAudio')}
                     </button>
                   {/if}
                 </div>
@@ -1235,7 +1235,7 @@
                   <div class="flex items-center justify-between pb-2 border-b border-slate-800">
                     <div class="flex items-center gap-2 text-amber-400">
                       <Radio class="w-4 h-4" />
-                      <span class="text-xs font-bold">APRS 受信パケット ({selectedRecord.aprs_packets?.length || 0} 件)</span>
+                      <span class="text-xs font-bold">{i18n.t('gallery.aprsPacketsCount', { count: selectedRecord.aprs_packets?.length || 0 })}</span>
                     </div>
                   </div>
                   {#if selectedRecord.aprs_packets && selectedRecord.aprs_packets.length > 0}
@@ -1259,7 +1259,7 @@
                       {/each}
                     </div>
                   {:else}
-                    <p class="text-xs text-slate-400 text-center py-6">このパスでデコードされたパケットはありません</p>
+                    <p class="text-xs text-slate-400 text-center py-6">{i18n.t('gallery.noAprsPacketsInPass')}</p>
                   {/if}
                 </div>
               {:else}

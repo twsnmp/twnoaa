@@ -15,7 +15,9 @@ const translations = {
       title: "3D Satellite Orbit Watch",
       subtitle: "Interactive 3D Earth Globe & Orbit Visualizer",
       station: "Observer Station",
-      activeSats: "Weather Satellites"
+      activeSats: "Weather Satellites",
+      aprsStations: "APRS Ground Stations:",
+      aprsCount: "{count} plotted"
     },
     status: {
       active: "RECEIVING SATELLITE",
@@ -80,6 +82,54 @@ const translations = {
       recordingBusy: "Recording already in progress",
       centerFreqMarker: "Center",
       satFreqMarker: "Sat Freq"
+    },
+    aprs: {
+      title: "ISS APRS Packet Monitor",
+      subtitle: "Real-time decoding and monitoring of global packet traffic relayed via the ARISS digipeater.",
+      searchPlaceholder: "Search callsign / payload...",
+      parsedView: "Parsed View",
+      rawTncView: "Raw TNC",
+      clear: "Clear",
+      clearTooltip: "Clear packet history",
+      packetCount: "Received Packets ({count})",
+      statusListening: "Listening",
+      noPackets: "No APRS Packets Yet",
+      noPacketsDesc: "Tune SDR to 437.825 MHz / 145.825 MHz (ISS APRS preset) to start receiving, or record an ISS pass.",
+      colTime: "Date / Time",
+      colSource: "Source",
+      colPath: "Path",
+      colType: "Type",
+      colLocation: "Location",
+      colMessage: "Message / Comment",
+      colRssi: "RSSI",
+      types: {
+        position: "Position",
+        message: "MSG",
+        status: "Status",
+        telemetry: "Telemetry",
+        weather: "Weather",
+        query: "Query"
+      },
+      detailTitle: "Packet Details",
+      close: "Close",
+      receivedTime: "Received At",
+      packetType: "Type",
+      detailTypes: {
+        position: "Position / Grid",
+        status: "Status",
+        message: "Message",
+        telemetry: "Telemetry",
+        weather: "Weather",
+        query: "Query"
+      },
+      sourceCall: "Source Callsign",
+      destPath: "Destination / Path",
+      directPath: "Direct (No Digipeater)",
+      coordinates: "Coordinates (GPS / Grid)",
+      openGoogleMaps: "Open in Google Maps",
+      messageComment: "Message / Comment",
+      noMessage: "(No text)",
+      rawTncFrame: "Raw TNC Frame"
     },
     gallery: {
       title: "Decoded APT Image Gallery",
@@ -196,7 +246,12 @@ const translations = {
       playTimeline: "Play Timeline",
       pauseTimeline: "Pause Timeline",
       seekTimeline: "Seek Timeline",
-      spectrumUnavailable: "No Raw IQ or WAV audio available for spectrum analysis on this pass."
+      spectrumUnavailable: "No Raw IQ or WAV audio available for spectrum analysis on this pass.",
+      voiceRecordTitle: "FM Voice Transmission Record",
+      voiceRecordDesc: "FM voice pass with no decoded image. You can listen to the recorded contact from the 'WAV Audio' tab above.",
+      playVoiceAudio: "Play Audio",
+      aprsPacketsCount: "Received APRS Packets ({count})",
+      noAprsPacketsInPass: "No packets decoded during this pass."
     },
     ai: {
       title: "AI Meteorological Image Analysis",
@@ -300,7 +355,9 @@ const translations = {
       title: "3D 衛星軌道モニタ",
       subtitle: "インタラクティブ 3D 地球儀 ＆ 軌道ビジュアル",
       station: "地上局観測地",
-      activeSats: "気象衛星一覧"
+      activeSats: "気象衛星一覧",
+      aprsStations: "APRS 地上局:",
+      aprsCount: "{count} 局プロット済"
     },
     status: {
       active: "衛星信号受信可能 (ACTIVE)",
@@ -365,6 +422,54 @@ const translations = {
       recordingBusy: "録音が既に実行中です",
       centerFreqMarker: "基準周波数 (中心)",
       satFreqMarker: "衛星周波数"
+    },
+    aprs: {
+      title: "ISS APRS パケットモニター",
+      subtitle: "ARISS デジピータ経由で中継された世界中のパケット通信をリアルタイムにデコード・監視します",
+      searchPlaceholder: "コールサイン / 本文を検索...",
+      parsedView: "パース表示",
+      rawTncView: "生TNC形式",
+      clear: "クリア",
+      clearTooltip: "パケット履歴をクリア",
+      packetCount: "受信パケット ({count} 件)",
+      statusListening: "受信待機中",
+      noPackets: "APRS パケットがまだありません",
+      noPacketsDesc: "SDR で 437.825 MHz / 145.825 MHz（ISS APRS プリセット）にチューニングして受信を開始するか、ISSの通過録音を実施してください。",
+      colTime: "日時",
+      colSource: "送信元",
+      colPath: "中継経路",
+      colType: "タイプ",
+      colLocation: "位置",
+      colMessage: "メッセージ / コメント",
+      colRssi: "RSSI",
+      types: {
+        position: "位置情報",
+        message: "MSG",
+        status: "ステータス",
+        telemetry: "テレメトリ",
+        weather: "気象",
+        query: "クエリ"
+      },
+      detailTitle: "パケット詳細",
+      close: "閉じる",
+      receivedTime: "受信日時",
+      packetType: "種別 (タイプ)",
+      detailTypes: {
+        position: "位置情報 (Position / Grid)",
+        status: "ステータス (Status)",
+        message: "メッセージ (Message)",
+        telemetry: "テレメトリ (Telemetry)",
+        weather: "気象データ (Weather)",
+        query: "クエリ (Query)"
+      },
+      sourceCall: "送信元コールサイン",
+      destPath: "宛先 / 経路 (PATH)",
+      directPath: "Direct (中継なし)",
+      coordinates: "位置座標 (GPS / グリッド)",
+      openGoogleMaps: "Google Maps で開く",
+      messageComment: "メッセージ / コメント",
+      noMessage: "(本文なし)",
+      rawTncFrame: "生 TNC フレーム"
     },
     gallery: {
       title: "デコード済み APT 衛星画像ギャラリー",
@@ -481,7 +586,12 @@ const translations = {
       playTimeline: "タイムライン再生",
       pauseTimeline: "一時停止",
       seekTimeline: "シーク",
-      spectrumUnavailable: "このパスにはスペクトラム解析可能なRaw IQまたはWAV音声が存在しません。"
+      spectrumUnavailable: "このパスにはスペクトラム解析可能なRaw IQまたはWAV音声が存在しません。",
+      voiceRecordTitle: "FM 音声通信レコード",
+      voiceRecordDesc: "画像デコード対象のないFM音声パスです。上の「WAVオーディオ」タブから交信録音を再生できます。",
+      playVoiceAudio: "音声を再生する",
+      aprsPacketsCount: "APRS 受信パケット ({count} 件)",
+      noAprsPacketsInPass: "このパスでデコードされたパケットはありません"
     },
     ai: {
       title: "AI気象解析システム (マルチLLM連携)",

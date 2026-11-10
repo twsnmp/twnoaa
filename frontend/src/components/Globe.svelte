@@ -399,9 +399,9 @@
         <div class="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
           <span class="text-amber-400 font-medium flex items-center gap-1.5">
             <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-            APRS 地上局:
+            {i18n.t('globe.aprsStations')}
           </span>
-          <span class="font-mono text-amber-300 font-bold">{aprsStations.length} 局プロット済</span>
+          <span class="font-mono text-amber-300 font-bold">{i18n.t('globe.aprsCount', { count: aprsStations.length })}</span>
         </div>
       {/if}
     </div>
