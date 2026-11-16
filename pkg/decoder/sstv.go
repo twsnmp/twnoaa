@@ -72,8 +72,12 @@ func DecodeSSTV(samples []float64, sampleRate int, outDir, baseName string) (*De
 	instFreq := computeInstantaneousFreq(samples, sampleRate)
 
 	// 2. Auto-detect SSTV Mode (PD120, Robot 36, or Martin M1) via sync pulse periodicity (1200 Hz pulses)
-	mode, syncStartSample := detectSSTVModeAndSync(instFreq, sampleRate)
-	logger.Infof("DECODER", "Detected SSTV mode: %s (sync start sample: %d)", mode.Name, syncStartSample)
+	mode, syncStartSample, syncScore := detectSSTVModeAndSync(instFreq, sampleRate)
+	logger.Infof("DECODER", "Detected SSTV mode: %s (sync start sample: %d, sync score: %.3f)", mode.Name, syncStartSample, syncScore)
+
+	if syncScore < 0.15 {
+		return nil, fmt.Errorf("no valid SSTV sync signal detected (sync score=%.3f)", syncScore)
+	}
 
 	// 3. Decode lines according to detected mode
 	var rgbImg *image.RGBA
@@ -207,7 +211,7 @@ func computeInstantaneousFreq(samples []float64, sampleRate int) []float64 {
 }
 
 // detectSSTVModeAndSync correlates the 1200 Hz sync pulse train against candidate SSTV modes
-func detectSSTVModeAndSync(instFreq []float64, sampleRate int) (SSTVMode, int) {
+func detectSSTVModeAndSync(instFreq []float64, sampleRate int) (SSTVMode, int, float64) {
 	sr := float64(sampleRate)
 	// Build a sync-indicator signal: +1 when freq is in [1120..1280 Hz] (1200Hz sync), -0.2 otherwise
 	syncSig := make([]float64, len(instFreq))
@@ -282,7 +286,7 @@ func detectSSTVModeAndSync(instFreq []float64, sampleRate int) (SSTVMode, int) {
 		}
 	}
 
-	return bestMode, fineBest
+	return bestMode, fineBest, fineMax
 }
 
 // freqToLevel maps [1500 Hz .. 2300 Hz] -> [0.0 .. 255.0]

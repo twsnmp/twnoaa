@@ -66,6 +66,12 @@ func (d *DSP) SetNarrowband(enable bool) {
 	d.narrowband = enable
 }
 
+// SetNarrowbandShift sets the NCO frequency offset (Hz) used in NBFM mode before the ±7.5 kHz FIR filter.
+// Use 0 for symmetric Doppler/channel filtering (e.g. SSTV) or +5000.0 to reject lower adjacent channels.
+func (d *DSP) SetNarrowbandShift(shiftHz float64) {
+	d.nbfmShiftHz = shiftHz
+}
+
 func (d *DSP) initNBFMFilter(sr1, cutoffHz float64) {
 	mid := nbfmFIRTaps / 2
 	var hSum float64
@@ -324,7 +330,8 @@ func (d *DSP) demodulateNBFM(iq []complex128) []float64 {
 			d.audioDecPhase = 0
 
 			d.nbfmDeemph = d.nbfmDeemph*alphaDeemph + val*(1.0-alphaDeemph)
-			out := d.nbfmDeemph
+			out := d.nbfmDeemph - d.dcState
+			d.dcState = d.dcState*0.995 + d.nbfmDeemph*0.005
 			if out > 1.0 {
 				out = 1.0
 			}

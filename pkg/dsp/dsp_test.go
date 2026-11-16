@@ -228,6 +228,55 @@ func TestCalculateSignalAndNoise(t *testing.T) {
 	}
 }
 
+func TestDemodulateNBFMSSTV(t *testing.T) {
+	sampleRate := 2080000
+	targetRate := 20800
+	numSamples := sampleRate / 5 // 0.2 sec
+
+	iq := make([]complex128, numSamples)
+	phase := 0.0
+	fSub := 1200.0   // SSTV sync tone
+	maxDev := 5000.0 // NBFM ±5 kHz deviation
+
+	for i := 0; i < numSamples; i++ {
+		tSec := float64(i) / float64(sampleRate)
+		instFreq := maxDev * math.Sin(2.0*math.Pi*fSub*tSec)
+		phase += 2.0 * math.Pi * instFreq / float64(sampleRate)
+		iq[i] = complex(math.Cos(phase), math.Sin(phase))
+	}
+
+	dspEngine := NewDSP(sampleRate, targetRate)
+	dspEngine.SetNarrowband(true)
+	dspEngine.SetNarrowbandShift(0)
+	audio := dspEngine.DemodulateFM(iq)
+
+	if len(audio) != numSamples/100 {
+		t.Fatalf("Expected %d audio samples, got %d", numSamples/100, len(audio))
+	}
+
+	// Skip initial filter transient (first 100 samples) and check DC mean and AC swing
+	var sum, minVal, maxVal float64
+	minVal = 1.0
+	maxVal = -1.0
+	tail := audio[100:]
+	for _, v := range tail {
+		sum += v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	mean := sum / float64(len(tail))
+	if math.Abs(mean) > 0.05 {
+		t.Errorf("Expected near-zero DC offset in NBFM SSTV audio, got %.4f", mean)
+	}
+	if maxVal-minVal < 0.3 {
+		t.Errorf("Expected strong SSTV audio swing in NBFM mode, got max=%.3f, min=%.3f", maxVal, minVal)
+	}
+}
+
 
 
 

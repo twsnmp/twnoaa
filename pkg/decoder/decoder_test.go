@@ -2,7 +2,9 @@ package decoder
 
 import (
 	"math"
+	"math/rand"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"twnoaa/pkg/dsp"
@@ -188,6 +190,25 @@ func TestDecodeSSTV_Robot36(t *testing.T) {
 	}
 	if _, err := os.Stat(res.FullImagePath); os.IsNotExist(err) {
 		t.Fatalf("SSTV image was not created at %s", res.FullImagePath)
+	}
+}
+
+func TestDecodeSSTV_NoSignal(t *testing.T) {
+	sampleRate := 20800
+	numSamples := sampleRate * 12 // 12 seconds of pure white noise
+	rng := rand.New(rand.NewSource(42))
+	samples := make([]float64, numSamples)
+	for i := range samples {
+		samples[i] = (rng.Float64()*2.0 - 1.0) * 0.25
+	}
+
+	outDir := t.TempDir()
+	res, err := DecodeSSTV(samples, sampleRate, outDir, "test_no_signal")
+	if err == nil {
+		t.Fatalf("Expected error when decoding noise-only SSTV audio, got result: %+v", res)
+	}
+	if _, statErr := os.Stat(filepath.Join(outDir, "test_no_signal_full.png")); !os.IsNotExist(statErr) {
+		t.Fatalf("Expected no PNG image to be created on noise-only input")
 	}
 }
 

@@ -519,7 +519,10 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		isLRPTSat := (strings.HasPrefix(upperSat, "METEOR") || strings.Contains(upperSat, "LRPT")) && !a.sdrService.IsSimulation()
 		isSSTVSat := !isAPRSSat && !isVoiceSat && !isLRPTSat && (freq == 145800000 || freq == 437550000 || strings.Contains(upperSat, "SSTV") || strings.Contains(upperSat, "SONATE") || freq >= 144000000)
 
-		dspEngine.SetNarrowband(isAPRSSat || isVoiceSat)
+		dspEngine.SetNarrowband(isAPRSSat || isVoiceSat || isSSTVSat)
+		if isSSTVSat {
+			dspEngine.SetNarrowbandShift(0)
+		}
 
 		var aprsDec *decoder.APRSDecoder
 		var capturedPackets []datastore.APRSPacket
@@ -1315,9 +1318,13 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 		upperBase := strings.ToUpper(base)
 		isAPRSSat := strings.Contains(upperBase, "APRS")
 		isVoiceSat := strings.Contains(upperBase, "VOICE") || strings.Contains(upperBase, "REPEATER")
+		isSSTVSat := !isAPRSSat && !isVoiceSat && (strings.Contains(upperBase, "ISS") || strings.Contains(upperBase, "SONATE") || strings.Contains(upperBase, "SSTV"))
 
 		dspEngine := dsp.NewDSP(cfg.SampleRate, 20800)
-		dspEngine.SetNarrowband(isAPRSSat || isVoiceSat)
+		dspEngine.SetNarrowband(isAPRSSat || isVoiceSat || isSSTVSat)
+		if isSSTVSat {
+			dspEngine.SetNarrowbandShift(0)
+		}
 		buf := make([]byte, 1024*128)
 		var pcmSamples []float64
 
