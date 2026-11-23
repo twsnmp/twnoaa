@@ -387,7 +387,7 @@ func verifyAndParseFrame(frame []byte, allowSingleBitRepair bool) *APRSPacket {
 	crcReceived := binary.LittleEndian.Uint16(frame[dataLen:])
 	crcComputed := computeCRC16(frame[:dataLen])
 
-	if crcReceived == crcComputed {
+	if crcReceived == crcComputed && isStrictValidAX25Header(frame[:dataLen]) {
 		if pkt, err := ParseAX25Frame(frame[:dataLen]); err == nil && pkt != nil {
 			return pkt
 		}
@@ -670,7 +670,7 @@ func (d *APRSDecoder) finishFrame() {
 	crcReceived := binary.LittleEndian.Uint16(d.frameBytes[dataLen:])
 	crcComputed := computeCRC16(d.frameBytes[:dataLen])
 
-	if crcReceived != crcComputed {
+	if crcReceived != crcComputed || !isStrictValidAX25Header(d.frameBytes[:dataLen]) {
 		return
 	}
 
@@ -714,6 +714,9 @@ func sanitizePrintablePayload(b []byte) string {
 func ParseAX25Frame(frame []byte) (*APRSPacket, error) {
 	if len(frame) < 16 {
 		return nil, fmt.Errorf("frame too short (%d bytes)", len(frame))
+	}
+	if !isStrictValidAX25Header(frame) {
+		return nil, fmt.Errorf("invalid AX.25 header")
 	}
 
 	// AX.25 Address format: 6 bytes callsign (each char >> 1), 1 byte SSID

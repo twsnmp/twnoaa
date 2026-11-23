@@ -11,6 +11,11 @@ import (
 // Helper: build AX.25 address field (7 bytes)
 func encodeCall(call string, isLast bool) []byte {
 	out := make([]byte, 7)
+	hasRepeated := false
+	if strings.HasSuffix(call, "*") {
+		hasRepeated = true
+		call = strings.TrimSuffix(call, "*")
+	}
 	parts := strings.Split(call, "-")
 	base := strings.ToUpper(parts[0])
 	ssid := 0
@@ -29,6 +34,9 @@ func encodeCall(call string, isLast bool) []byte {
 	}
 
 	ssidByte := byte((ssid << 1) | 0x60) // reserved bits set
+	if hasRepeated {
+		ssidByte |= 0x80
+	}
 	if isLast {
 		ssidByte |= 0x01
 	}
@@ -377,4 +385,28 @@ func TestReParsePacket(t *testing.T) {
 		t.Errorf("Expected HasLocation false for RS0ISS dummy 0P0PS4 packet")
 	}
 }
+
+func TestRejectInvalidAX25HeaderWithValidCRC(t *testing.T) {
+	// Simulate a false-positive CRC-16 match from random noise containing control/symbol characters in callsigns.
+	frame := buildTestAX25Frame("I(\x15\vB\x1f-4", "f!'fU-9", nil, "")
+
+	if _, err := ParseAX25Frame(frame[:len(frame)-2]); err == nil {
+		t.Errorf("Expected ParseAX25Frame to reject invalid callsign characters, but it succeeded")
+	}
+	if pkt := verifyAndParseFrame(frame, false); pkt != nil {
+		t.Errorf("Expected verifyAndParseFrame(false) to reject invalid callsign characters, got %+v", pkt)
+	}
+	if pkt := verifyAndParseFrame(frame, true); pkt != nil {
+		t.Errorf("Expected verifyAndParseFrame(true) to reject invalid callsign characters, got %+v", pkt)
+	}
+
+	// Also verify full AFSK demodulation rejects the false-positive frame (covers Branch 1 finishFrame & Branch 2).
+	sampleRate := 20800
+	audio := synthesizeAFSK(frame, sampleRate, 32, 16)
+	dec := NewAPRSDecoder(sampleRate)
+	if pkts := dec.DecodeSamples(audio); len(pkts) != 0 {
+		t.Errorf("Expected 0 packets from invalid AX.25 header audio, got %d (%+v)", len(pkts), pkts[0])
+	}
+}
+
 
