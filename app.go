@@ -25,18 +25,28 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+type SDRAlert struct {
+	Active    bool      `json:"active"`
+	FailCount int       `json:"fail_count"`
+	Message   string    `json:"message"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type App struct {
-	ctx            context.Context
-	store          *datastore.Store
-	tracker        *tracker.Tracker
-	sdrService     *sdr.SDR
-	recording      bool
-	recMu          sync.Mutex
-	recordedPasses map[string]time.Time
-	recPassMu      sync.Mutex
-	version        string
-	recentPackets  []decoder.APRSPacket
-	packetMu       sync.RWMutex
+	ctx              context.Context
+	store            *datastore.Store
+	tracker          *tracker.Tracker
+	sdrService       *sdr.SDR
+	recording        bool
+	recMu            sync.Mutex
+	recordedPasses   map[string]time.Time
+	recPassMu        sync.Mutex
+	version          string
+	recentPackets    []decoder.APRSPacket
+	packetMu         sync.RWMutex
+	sdrAlertMu       sync.RWMutex
+	sdrOpenFailCount int
+	sdrOpenAlert     SDRAlert
 }
 
 func NewApp(version, commit string) *App {
@@ -387,11 +397,56 @@ func (a *App) GetSDRDeviceInfo() sdr.DeviceInfo {
 	return sdr.GetDeviceInfo()
 }
 
+func (a *App) GetSDRAlert() SDRAlert {
+	a.sdrAlertMu.RLock()
+	defer a.sdrAlertMu.RUnlock()
+	return a.sdrOpenAlert
+}
+
+func (a *App) ClearSDRAlert() {
+	a.sdrAlertMu.Lock()
+	a.sdrOpenFailCount = 0
+	wasActive := a.sdrOpenAlert.Active
+	a.sdrOpenAlert = SDRAlert{Active: false}
+	a.sdrAlertMu.Unlock()
+
+	if wasActive && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "sdr_alert", SDRAlert{Active: false})
+	}
+}
+
+func (a *App) recordSDROpenFailure(err error) {
+	a.sdrAlertMu.Lock()
+	a.sdrOpenFailCount++
+	a.sdrOpenAlert = SDRAlert{
+		Active:    true,
+		FailCount: a.sdrOpenFailCount,
+		Message:   err.Error(),
+		UpdatedAt: time.Now(),
+	}
+	alert := a.sdrOpenAlert
+	a.sdrAlertMu.Unlock()
+
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "sdr_alert", alert)
+	}
+}
+
+func (a *App) clearSDROpenFailure() {
+	a.ClearSDRAlert()
+}
+
 func (a *App) StartSDR(freq, sampleRate, gain int, autoGain, forceSim bool) string {
 	cfg := a.store.GetConfig()
 	err := a.sdrService.StartStream(freq, sampleRate, gain, autoGain, cfg.BiasTee, forceSim)
 	if err != nil {
+		if !forceSim {
+			a.recordSDROpenFailure(err)
+		}
 		return fmt.Sprintf("Failed to start SDR: %v", err)
+	}
+	if !forceSim {
+		a.clearSDROpenFailure()
 	}
 
 	// Stream waterfall data to frontend with throttling and skipping during recording
@@ -494,7 +549,19 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 		}()
 
 		if !wasStreaming {
-			_ = a.sdrService.StartStream(freq, cfg.SampleRate, gain, autoGain, cfg.BiasTee, cfg.SimulationMode)
+			if err := a.sdrService.StartStream(freq, cfg.SampleRate, gain, autoGain, cfg.BiasTee, cfg.SimulationMode); err != nil {
+				logger.Errorf("RECORDING", "Aborting recording for %s: failed to open SDR: %v", satName, err)
+				if !cfg.SimulationMode {
+					a.recordSDROpenFailure(err)
+				}
+				if a.ctx != nil {
+					runtime.EventsEmit(a.ctx, "decode_error", fmt.Sprintf("SDR open failed: %v", err))
+				}
+				return
+			}
+			if !cfg.SimulationMode {
+				a.clearSDROpenFailure()
+			}
 		} else {
 			_ = a.sdrService.SetCenterFreq(freq)
 			_ = a.sdrService.SetGain(gain, autoGain)

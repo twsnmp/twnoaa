@@ -176,7 +176,12 @@
       isStreaming = false
     } else {
       const res = await window.go.main.App.StartSDR(centerFreq, 2080000, tunerGain, autoGain, forceSim)
-      isStreaming = true
+      if (typeof res === 'string' && res.startsWith('Failed')) {
+        isStreaming = false
+        recordStatus = res
+      } else {
+        isStreaming = true
+      }
     }
   }
 

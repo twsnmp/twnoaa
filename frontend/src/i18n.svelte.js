@@ -24,6 +24,11 @@ const translations = {
       standby: "STANDBY / MONITORING",
       sim: "SIMULATION MODE"
     },
+    sdrAlert: {
+      title: "RTL-SDR Hardware Open Failed",
+      desc: "Failed to open RTL-SDR device (consecutive failures: {count}). Check USB connection or restart the app. Auto-recording will not fall back to simulation.",
+      dismiss: "Dismiss"
+    },
     tracker: {
       liveStatus: "Live Satellite Sky Watch",
       upcomingPasses: "Upcoming Passes (24 Hours)",
@@ -363,6 +368,11 @@ const translations = {
       active: "衛星信号受信可能 (ACTIVE)",
       standby: "待機中・圏外",
       sim: "シミュレーションモード"
+    },
+    sdrAlert: {
+      title: "RTL-SDR ハードウェアを開けません",
+      desc: "RTL-SDR デバイスのオープンに失敗しました（連続失敗: {count} 回）。USB接続を確認するかアプリを再起動してください。シミュレーションへの自動フォールバックは行われません。",
+      dismiss: "閉じる"
     },
     tracker: {
       liveStatus: "リアルタイム衛星飛来モニタ",

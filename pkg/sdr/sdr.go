@@ -95,36 +95,60 @@ func (s *SDR) StartStream(freq, sampleRate, gain int, autoGain, biasTee, forceSi
 	s.autoGain = autoGain
 	s.biasTee = biasTee
 
-	devCount := rtl.GetDeviceCount()
-	if devCount == 0 || forceSim {
+	if forceSim {
 		s.simulationMode = true
-		logger.Warnf("SDR", "Starting stream in SIMULATION mode (devCount=%d, forceSim=%v, freq=%.4fMHz)", devCount, forceSim, float64(freq)/1e6)
+		logger.Warnf("SDR", "Starting stream in SIMULATION mode (forceSim=true, freq=%.4fMHz)", float64(freq)/1e6)
 	} else {
-		dev, err := rtl.Open(0)
-		if err != nil {
-			s.simulationMode = true
-			logger.Errorf("SDR", "Failed to open RTL-SDR device #0: %v. Falling back to SIMULATION mode.", err)
-		} else {
-			s.device = dev
-			s.simulationMode = false
-			_ = dev.SetCenterFreq(freq)
-			_ = dev.SetSampleRate(sampleRate)
-			_ = dev.SetTunerGainMode(!autoGain)
-			_ = dev.SetAgcMode(autoGain)
-			if !autoGain {
-				_ = dev.SetTunerGain(gain)
-			}
+		const maxOpenAttempts = 5
+		const retryDelay = 500 * time.Millisecond
 
-			// Configure Bias-Tee (4.5V coaxial power for active LNA/antennas)
-			if err := dev.SetBiasTee(biasTee); err != nil {
-				logger.Warnf("SDR", "Failed to configure Bias-Tee (enable=%v): %v", biasTee, err)
+		var dev *rtl.Context
+		var lastErr error
+
+		for attempt := 1; attempt <= maxOpenAttempts; attempt++ {
+			devCount := rtl.GetDeviceCount()
+			if devCount == 0 {
+				lastErr = fmt.Errorf("no RTL-SDR device found (count=0)")
 			} else {
-				logger.Infof("SDR", "Bias-Tee (4.5V coaxial power) configured: %v", biasTee)
+				d, err := rtl.Open(0)
+				if err == nil {
+					dev = d
+					lastErr = nil
+					break
+				}
+				lastErr = err
 			}
 
-			_ = dev.ResetBuffer()
-			logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, bias_tee=%v", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain, biasTee)
+			if attempt < maxOpenAttempts {
+				logger.Warnf("SDR", "Failed to open RTL-SDR device #0 (attempt %d/%d): %v. Retrying in %v...", attempt, maxOpenAttempts, lastErr, retryDelay)
+				time.Sleep(retryDelay)
+			}
 		}
+
+		if dev == nil {
+			logger.Errorf("SDR", "Failed to open RTL-SDR device #0 after %d attempts: %v", maxOpenAttempts, lastErr)
+			return fmt.Errorf("failed to open RTL-SDR device #0 after %d attempts: %w", maxOpenAttempts, lastErr)
+		}
+
+		s.device = dev
+		s.simulationMode = false
+		_ = dev.SetCenterFreq(freq)
+		_ = dev.SetSampleRate(sampleRate)
+		_ = dev.SetTunerGainMode(!autoGain)
+		_ = dev.SetAgcMode(autoGain)
+		if !autoGain {
+			_ = dev.SetTunerGain(gain)
+		}
+
+		// Configure Bias-Tee (4.5V coaxial power for active LNA/antennas)
+		if err := dev.SetBiasTee(biasTee); err != nil {
+			logger.Warnf("SDR", "Failed to configure Bias-Tee (enable=%v): %v", biasTee, err)
+		} else {
+			logger.Infof("SDR", "Bias-Tee (4.5V coaxial power) configured: %v", biasTee)
+		}
+
+		_ = dev.ResetBuffer()
+		logger.Infof("SDR", "Hardware stream started: freq=%.4fMHz, sample_rate=%dHz, tuner_gain=%.1fdB, auto_gain=%v, bias_tee=%v", float64(freq)/1e6, sampleRate, float64(gain)/10.0, autoGain, biasTee)
 	}
 
 	s.isStreaming = true
