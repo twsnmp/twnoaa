@@ -27,13 +27,18 @@ type Config struct {
 	ObserverCity string  `json:"observer_city"`
 
 	// LLM settings
-	ActiveProvider  string `json:"active_provider"` // gemini | openai | ollama | anthropic
-	APIKeyGemini    string `json:"api_key_gemini"`
-	APIKeyOpenAI    string `json:"api_key_openai"`
-	APIKeyAnthropic string `json:"api_key_anthropic"`
-	OllamaURL       string `json:"ollama_url"`
-	OllamaModel     string `json:"ollama_model"`
-	AutoAnalyze     bool   `json:"auto_analyze"`
+	ActiveProvider   string `json:"active_provider"` // gemini | openai | openrouter | ollama | anthropic
+	APIKeyGemini     string `json:"api_key_gemini"`
+	GeminiModel      string `json:"gemini_model"`
+	APIKeyOpenAI     string `json:"api_key_openai"`
+	OpenAIBaseURL    string `json:"openai_base_url"`
+	OpenAIModel      string `json:"openai_model"`
+	APIKeyOpenRouter string `json:"api_key_openrouter"`
+	OpenRouterModel  string `json:"openrouter_model"`
+	APIKeyAnthropic  string `json:"api_key_anthropic"`
+	OllamaURL        string `json:"ollama_url"`
+	OllamaModel      string `json:"ollama_model"`
+	AutoAnalyze      bool   `json:"auto_analyze"`
 
 	// SDR Receiver settings
 	CenterFreq         int  `json:"center_freq"`
@@ -75,6 +80,7 @@ type PassRecord struct {
 	ChannelA       string        `json:"channel_a"`
 	ChannelB       string        `json:"channel_b"`
 	AudioPath      string        `json:"audio_path"`
+	VoiceAudioPath string        `json:"voice_audio_path,omitempty"`
 	RawIQPath      string        `json:"raw_iq_path,omitempty"`
 	DecodeMode     string        `json:"decode_mode,omitempty"`
 	DayFraction    float64       `json:"day_fraction,omitempty"`
@@ -167,6 +173,8 @@ func (s *Store) initBuckets(baseDir string) error {
 				ObserverAlt:        0.02,
 				ObserverCity:       "Kitamoto, Saitama",
 				ActiveProvider:     "ollama",
+				GeminiModel:        "gemini-2.5-flash",
+				OpenRouterModel:    "google/gemma-4-31b-it:free",
 				OllamaURL:          "http://localhost:11434",
 				OllamaModel:        "llama3",
 				AutoAnalyze:        true,
@@ -214,6 +222,8 @@ func (s *Store) GetConfig() Config {
 		ObserverAlt:        0.02,
 		ObserverCity:       "Kitamoto, Saitama",
 		ActiveProvider:     "ollama",
+		GeminiModel:        "gemini-2.5-flash",
+		OpenRouterModel:    "google/gemma-4-31b-it:free",
 		OllamaURL:          "http://localhost:11434",
 		OllamaModel:        "llama3",
 		AutoAnalyze:        true,

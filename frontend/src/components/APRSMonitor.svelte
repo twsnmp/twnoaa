@@ -1,13 +1,38 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { i18n } from '../i18n.svelte.js'
-  import { Radio, Search, Trash2, MapPin, MessageSquare, Activity, Terminal, ExternalLink } from '@lucide/svelte'
+  import { Radio, Search, Trash2, MapPin, MessageSquare, Activity, Terminal, ExternalLink, Sparkles, Loader2 } from '@lucide/svelte'
+  import AIMarkdown from './common/AIMarkdown.svelte'
 
   let packets = $state([])
   let searchQuery = $state('')
   let showRawTNC = $state(false)
   let selectedPacket = $state(null)
+  let aiExplanation = $state('')
+  let isExplaining = $state(false)
+  let explainError = $state('')
   let cancelEvent = null
+
+  function selectPacket(pkt) {
+    selectedPacket = pkt
+    aiExplanation = ''
+    explainError = ''
+  }
+
+  async function explainSelectedPacket() {
+    if (!selectedPacket || isExplaining || !window.go?.main?.App?.ExplainAPRSPacket) return
+    isExplaining = true
+    aiExplanation = ''
+    explainError = ''
+    try {
+      const res = await window.go.main.App.ExplainAPRSPacket(selectedPacket, i18n.currentLocale)
+      aiExplanation = res || ''
+    } catch (err) {
+      explainError = i18n.t('aprs.explainError') + (err?.message || err)
+    } finally {
+      isExplaining = false
+    }
+  }
 
   let filteredPackets = $derived.by(() => {
     if (!searchQuery.trim()) return packets
@@ -236,7 +261,7 @@
             <tbody class="divide-y divide-slate-800/50">
               {#each filteredPackets as pkt}
                 <tr
-                  onclick={() => selectedPacket = pkt}
+                  onclick={() => selectPacket(pkt)}
                   class="hover:bg-slate-800/50 cursor-pointer transition-colors {selectedPacket === pkt ? 'bg-amber-500/10' : ''}"
                 >
                   <td class="py-2.5 px-3 font-mono text-slate-400 shrink-0 whitespace-nowrap" title={formatDateTime(pkt.timestamp)}>
@@ -381,6 +406,41 @@
             <div class="p-2.5 rounded-xl bg-black/60 border border-slate-800 text-amber-300/90 font-mono text-[11px] break-all select-all">
               {selectedPacket.raw_tnc}
             </div>
+          </div>
+
+          <div class="pt-2 border-t border-slate-800 space-y-2.5">
+            <button
+              type="button"
+              onclick={explainSelectedPacket}
+              disabled={isExplaining}
+              class="w-full px-3 py-2 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {#if isExplaining}
+                <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                <span>{i18n.t('aprs.explainingPacket')}</span>
+              {:else}
+                <Sparkles class="w-3.5 h-3.5 text-amber-300" />
+                <span>{i18n.t('aprs.explainPacket')}</span>
+              {/if}
+            </button>
+
+            {#if explainError}
+              <div class="p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-[11px] break-words">
+                {explainError}
+              </div>
+            {/if}
+
+            {#if aiExplanation}
+              <div class="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span class="text-[10px] text-cyan-400 uppercase font-bold flex items-center gap-1">
+                  <Sparkles class="w-3 h-3" />
+                  {i18n.t('aprs.aiExplanation')}
+                </span>
+                <div class="text-xs leading-relaxed">
+                  <AIMarkdown content={aiExplanation} />
+                </div>
+              </div>
+            {/if}
           </div>
         </div>
       </div>

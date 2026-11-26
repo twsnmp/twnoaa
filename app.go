@@ -775,6 +775,11 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			logger.Infof("RECORDING", "Intermediate audio WAV saved successfully: %s", wavPath)
 		}
 
+		voiceWavPath := ""
+		if isVoiceSat && len(pcmSamples) > 0 {
+			voiceWavPath = buildEnhancedVoiceWAV(pcmSamples, audioDir, baseName)
+		}
+
 		maxElev, maxElevAz := a.getSatMaxElevationInfo(satName, cfg, startTime)
 
 		fullImgPath := ""
@@ -809,6 +814,7 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			ChannelA:       chanAPath,
 			ChannelB:       chanBPath,
 			AudioPath:      wavPath,
+			VoiceAudioPath: voiceWavPath,
 			RawIQPath:      rawIQPath,
 			DecodeMode:     decodeMode,
 			DayFraction:    dayFraction,
@@ -823,8 +829,8 @@ func (a *App) StartRecordingAndDecode(satName string, freq int, durationSec int,
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
 		}
 
-		// Auto AI analysis if enabled (only for records with a decoded image)
-		if cfg.AutoAnalyze && record.ImagePath != "" {
+		// Auto AI analysis if enabled (for records with a decoded image, FM voice audio, or APRS packets)
+		if cfg.AutoAnalyze && (record.ImagePath != "" || (record.DecodeMode == "VOICE" && (record.VoiceAudioPath != "" || record.AudioPath != "")) || len(record.APRSPackets) > 0) {
 			logger.Infof("RECORDING", "Triggering auto AI analysis for record %s", record.ID)
 			a.RunAIAnalysis(record.ID, "ja")
 		}
@@ -858,6 +864,56 @@ func (a *App) GetPassRecords() []*datastore.PassRecord {
 	return a.store.GetRecords()
 }
 
+func buildEnhancedVoiceWAV(pcmSamples []float64, audioDir, baseName string) string {
+	_ = os.MkdirAll(audioDir, 0755)
+	voicePath := fmt.Sprintf("%s/%s_voice_clean.wav", audioDir, baseName)
+	enhanced, extracted := dsp.ProcessFMVoice(pcmSamples, 20800)
+	if err := dsp.SaveWAV(voicePath, 20800, dsp.ConvertFloatToINT16(enhanced)); err != nil {
+		logger.Warnf("RECORDING", "Failed to save enhanced voice WAV file: %v", err)
+		return ""
+	}
+	logger.Infof("RECORDING", "Enhanced FM voice WAV saved: %s (extracted_active=%v)", voicePath, extracted)
+	return voicePath
+}
+
+// EnhanceVoiceRecord generates an extracted and speech-enhanced WAV file for an existing VOICE pass record.
+func (a *App) EnhanceVoiceRecord(recordID string) string {
+	records := a.store.GetRecords()
+	var target *datastore.PassRecord
+	for _, r := range records {
+		if r.ID == recordID {
+			target = r
+			break
+		}
+	}
+	if target == nil {
+		return "Error: Record not found"
+	}
+	if target.AudioPath == "" {
+		return "Error: No audio file for this record"
+	}
+	if _, err := os.Stat(target.AudioPath); os.IsNotExist(err) {
+		return "Error: Audio file does not exist on disk"
+	}
+
+	cfg := a.store.GetConfig()
+	audioDir := filepath.Join(cfg.DataDir, "audio")
+	_ = os.MkdirAll(audioDir, 0755)
+	voicePath := filepath.Join(audioDir, target.ID+"_voice_clean.wav")
+	extracted, err := dsp.ProcessFMVoiceWAV(target.AudioPath, voicePath)
+	if err != nil {
+		return fmt.Sprintf("Error: Failed to enhance voice audio: %v", err)
+	}
+
+	target.VoiceAudioPath = voicePath
+	_ = a.store.UpdateRecord(target)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "decode_complete", target)
+	}
+	logger.Infof("APP", "Enhanced voice record %s -> %s (extracted_active=%v)", target.ID, voicePath, extracted)
+	return voicePath
+}
+
 func (a *App) RunAIAnalysis(recordID string, lang string) string {
 	records := a.store.GetRecords()
 	var target *datastore.PassRecord
@@ -872,12 +928,43 @@ func (a *App) RunAIAnalysis(recordID string, lang string) string {
 		return "Error: Record not found"
 	}
 
-	if target.ImagePath == "" {
-		return "Error: No image path for this record"
-	}
-
-	if _, err := os.Stat(target.ImagePath); os.IsNotExist(err) {
-		return "Error: Image file does not exist on disk"
+	isVoice := target.DecodeMode == "VOICE"
+	isAPRS := target.DecodeMode == "APRS" || (target.ImagePath == "" && !isVoice && len(target.APRSPackets) > 0)
+	var audioPath string
+	if isVoice {
+		audioPath = target.VoiceAudioPath
+		if audioPath == "" && target.AudioPath != "" {
+			if _, err := os.Stat(target.AudioPath); err == nil {
+				cfg := a.store.GetConfig()
+				audioDir := filepath.Join(cfg.DataDir, "audio")
+				_ = os.MkdirAll(audioDir, 0755)
+				candidate := filepath.Join(audioDir, target.ID+"_voice_clean.wav")
+				if _, err := dsp.ProcessFMVoiceWAV(target.AudioPath, candidate); err == nil {
+					target.VoiceAudioPath = candidate
+					_ = a.store.UpdateRecord(target)
+					audioPath = candidate
+				} else {
+					audioPath = target.AudioPath
+				}
+			}
+		}
+		if audioPath == "" {
+			return "Error: No audio path for this voice record"
+		}
+		if _, err := os.Stat(audioPath); os.IsNotExist(err) {
+			return "Error: Audio file does not exist on disk"
+		}
+	} else if isAPRS {
+		if len(target.APRSPackets) == 0 {
+			return "Error: No APRS packets for this record"
+		}
+	} else {
+		if target.ImagePath == "" {
+			return "Error: No image path for this record"
+		}
+		if _, err := os.Stat(target.ImagePath); os.IsNotExist(err) {
+			return "Error: Image file does not exist on disk"
+		}
 	}
 
 	if lang == "" {
@@ -895,11 +982,20 @@ func (a *App) RunAIAnalysis(recordID string, lang string) string {
 		MaxElevation:   target.MaxElevation,
 		MaxElevationAz: target.MaxElevationAz,
 		ImagePath:      filepath.Clean(target.ImagePath),
+		AudioPath:      filepath.Clean(audioPath),
 		Lang:           lang,
 	}
 
 	go func() {
-		analysis, err := ai.AnalyzeSatelliteImage(a.ctx, cfg, req)
+		var analysis string
+		var err error
+		if isVoice {
+			analysis, err = ai.AnalyzeVoiceAudio(a.ctx, cfg, req)
+		} else if isAPRS {
+			analysis, err = ai.AnalyzeAPRSPackets(a.ctx, cfg, req, target.APRSPackets)
+		} else {
+			analysis, err = ai.AnalyzeSatelliteImage(a.ctx, cfg, req)
+		}
 		if err != nil {
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "ai_error", err.Error())
@@ -917,6 +1013,19 @@ func (a *App) RunAIAnalysis(recordID string, lang string) string {
 	}()
 
 	return "AI analysis started in background"
+}
+
+// ExplainAPRSPacket runs AI explanation for a single decoded APRS packet.
+func (a *App) ExplainAPRSPacket(pkt datastore.APRSPacket, lang string) (string, error) {
+	if lang == "" {
+		lang = "ja"
+	}
+	cfg := a.store.GetConfig()
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return ai.AnalyzeAPRSPacket(ctx, cfg, pkt, lang)
 }
 
 func (a *App) GetImageBase64(imagePath string) string {
@@ -1285,6 +1394,17 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			dayFraction = res.DayFraction
 		}
 
+		voiceWavPath := ""
+		if decodeMode == "VOICE" {
+			audioDir := filepath.Join(cfg.DataDir, "audio")
+			_ = os.MkdirAll(audioDir, 0755)
+			candidate := filepath.Join(audioDir, baseName+"_voice_clean.wav")
+			if extracted, err := dsp.ProcessFMVoiceWAV(wavPath, candidate); err == nil {
+				voiceWavPath = candidate
+				logger.Infof("APP", "Enhanced FM voice WAV saved from WAV file: %s (extracted_active=%v)", voiceWavPath, extracted)
+			}
+		}
+
 		record := &datastore.PassRecord{
 			ID:             baseName,
 			SatName:        satName,
@@ -1302,6 +1422,7 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			ChannelA:       chanAPath,
 			ChannelB:       chanBPath,
 			AudioPath:      wavPath,
+			VoiceAudioPath: voiceWavPath,
 			DecodeMode:     decodeMode,
 			DayFraction:    dayFraction,
 			APRSPackets:    aprsPackets,
@@ -1314,7 +1435,7 @@ func (a *App) DecodeWAVFile(wavPath string) string {
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
 		}
 
-		if cfg.AutoAnalyze && record.ImagePath != "" {
+		if cfg.AutoAnalyze && (record.ImagePath != "" || (record.DecodeMode == "VOICE" && (record.VoiceAudioPath != "" || record.AudioPath != "")) || len(record.APRSPackets) > 0) {
 			logger.Infof("APP", "Triggering auto AI analysis for WAV test record %s", record.ID)
 			a.RunAIAnalysis(record.ID, "ja")
 		}
@@ -1485,6 +1606,11 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			wavPath = ""
 		}
 
+		voiceWavPath := ""
+		if res.DecodeMode == "VOICE" && len(pcmSamples) > 0 {
+			voiceWavPath = buildEnhancedVoiceWAV(pcmSamples, audioDir, baseName)
+		}
+
 		record := &datastore.PassRecord{
 			ID:             baseName,
 			SatName:        satName,
@@ -1502,6 +1628,7 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			ChannelA:       res.ChanAPath,
 			ChannelB:       res.ChanBPath,
 			AudioPath:      wavPath,
+			VoiceAudioPath: voiceWavPath,
 			RawIQPath:      iqPath,
 			DecodeMode:     res.DecodeMode,
 			DayFraction:    res.DayFraction,
@@ -1515,7 +1642,7 @@ func (a *App) DecodeRawIQFile(iqPath string) string {
 			runtime.EventsEmit(a.ctx, "decode_complete", record)
 		}
 
-		if cfg.AutoAnalyze && record.ImagePath != "" {
+		if cfg.AutoAnalyze && (record.ImagePath != "" || (record.DecodeMode == "VOICE" && (record.VoiceAudioPath != "" || record.AudioPath != "")) || len(record.APRSPackets) > 0) {
 			a.RunAIAnalysis(record.ID, "ja")
 		}
 	}()

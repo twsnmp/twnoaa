@@ -25,7 +25,9 @@
   let copied = $state(false)
 
   let analysisResult = $derived(record?.ai_analysis || '')
-  let hasImage = $derived(!!record?.image_path)
+  let isVoiceRecord = $derived(record?.decode_mode === 'VOICE')
+  let isAPRSRecord = $derived(record?.decode_mode === 'APRS' || (!record?.image_path && record?.decode_mode !== 'VOICE' && (record?.aprs_packets?.length || 0) > 0))
+  let hasImage = $derived(!!record?.image_path || (isVoiceRecord && !!(record?.voice_audio_path || record?.audio_path)) || isAPRSRecord)
 
   async function loadRecords() {
     if (window.go?.main?.App) {

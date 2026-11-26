@@ -11,7 +11,12 @@
     observer_city: 'Kitamoto, Saitama',
     active_provider: 'ollama',
     api_key_gemini: '',
+    gemini_model: 'gemini-2.5-flash',
     api_key_openai: '',
+    openai_base_url: '',
+    openai_model: '',
+    api_key_openrouter: '',
+    openrouter_model: 'google/gemma-4-31b-it:free',
     api_key_anthropic: '',
     ollama_url: 'http://localhost:11434',
     ollama_model: 'llama3',
@@ -442,8 +447,9 @@
           class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
         >
           <option value="ollama">Ollama (Local LLM)</option>
-          <option value="gemini">Google Gemini</option>
-          <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+          <option value="gemini">Google Gemini (Free Tier / API)</option>
+          <option value="openrouter">OpenRouter (Free / Multi-Model)</option>
+          <option value="openai">OpenAI / OpenAI-Compatible</option>
           <option value="anthropic">Anthropic Claude</option>
         </select>
       </div>
@@ -495,7 +501,39 @@
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
             />
           </div>
+          <div>
+            <label for="gemini-model-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.geminiModel')}</label>
+            <input
+              id="gemini-model-input"
+              type="text"
+              bind:value={cfg.gemini_model}
+              placeholder="gemini-2.5-flash"
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
           <p class="text-[11px] text-slate-500">{i18n.t('settings.geminiHint')}</p>
+        {:else if cfg.active_provider === 'openrouter'}
+          <div>
+            <label for="openrouter-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openrouterKey')}</label>
+            <input
+              id="openrouter-key-input"
+              type="password"
+              bind:value={cfg.api_key_openrouter}
+              placeholder="sk-or-v1-..."
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+          <div>
+            <label for="openrouter-model-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openrouterModel')}</label>
+            <input
+              id="openrouter-model-input"
+              type="text"
+              bind:value={cfg.openrouter_model}
+              placeholder="google/gemma-4-31b-it:free"
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+          <p class="text-[11px] text-slate-500">{i18n.t('settings.openrouterHint')}</p>
         {:else if cfg.active_provider === 'openai'}
           <div>
             <label for="openai-key-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openaiKey')}</label>
@@ -505,6 +543,26 @@
               bind:value={cfg.api_key_openai}
               placeholder="sk-..."
               class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+          <div>
+            <label for="openai-baseurl-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openaiBaseUrl')}</label>
+            <input
+              id="openai-baseurl-input"
+              type="text"
+              bind:value={cfg.openai_base_url}
+              placeholder="https://api.openai.com/v1"
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+          <div>
+            <label for="openai-model-input" class="text-xs font-semibold text-slate-400 block mb-1">{i18n.t('settings.openaiModel')}</label>
+            <input
+              id="openai-model-input"
+              type="text"
+              bind:value={cfg.openai_model}
+              placeholder="gpt-4o-mini"
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500"
             />
           </div>
           <p class="text-[11px] text-slate-500">{i18n.t('settings.openaiHint')}</p>

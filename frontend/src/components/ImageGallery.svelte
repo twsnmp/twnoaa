@@ -18,6 +18,8 @@
   let showBatchDeleteModal = $state(false)
   let recordRawIQToDelete = $state(null)
   let showBatchRawIQDeleteModal = $state(false)
+  let isEnhancingVoice = $state(false)
+  let enhanceVoiceError = $state('')
   let viewMode = $state('stretch') // 'stretch' | 'fit'
   let showZoomModal = $state(false)
   let zoomScale = $state(1)
@@ -556,6 +558,11 @@
         if (records.length > 0) {
           if (!selectedRecord || !records.find(r => r.id === selectedRecord.id)) {
             selectedRecord = records[0]
+          } else {
+            const updated = records.find(r => r.id === selectedRecord.id)
+            if (updated) {
+              selectedRecord = updated
+            }
           }
           if (selectedRecordIds.length === 0) {
             const withData = records.filter(r => r.signal_history && r.signal_history.length > 0)
@@ -1305,9 +1312,56 @@
             </div>
           {:else if detailViewTab === 'audio'}
             <div class="space-y-4">
+              {#if selectedRecord.decode_mode === 'VOICE'}
+                {#if selectedRecord.voice_audio_path}
+                  <AudioPlayer
+                    audioPath={selectedRecord.voice_audio_path}
+                    title={`${selectedRecord.sat_name} (Voice Enhanced / Extracted)`}
+                  />
+                {:else if selectedRecord.audio_path && window.go?.main?.App?.EnhanceVoiceRecord}
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between gap-3 p-3 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-xs text-indigo-200">
+                      <span>{i18n.currentLocale === 'en' ? 'Extract active voice segments and apply speech clarity filter.' : '音声のある区間を自動抽出し、聞き取りやすく補正できます。'}</span>
+                      <button
+                        type="button"
+                        disabled={isEnhancingVoice}
+                        onclick={async () => {
+                          if (!selectedRecord || isEnhancingVoice) return
+                          isEnhancingVoice = true
+                          enhanceVoiceError = ''
+                          try {
+                            const res = await window.go.main.App.EnhanceVoiceRecord(selectedRecord.id)
+                            if (res && res.startsWith('Error:')) {
+                              enhanceVoiceError = res
+                            } else if (res) {
+                              selectedRecord = { ...selectedRecord, voice_audio_path: res }
+                              await loadRecords()
+                            }
+                          } catch (err) {
+                            enhanceVoiceError = String(err)
+                          } finally {
+                            isEnhancingVoice = false
+                          }
+                        }}
+                        class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold shrink-0 cursor-pointer"
+                      >
+                        {#if isEnhancingVoice}
+                          {i18n.currentLocale === 'en' ? 'Enhancing...' : '補正・抜粋中...'}
+                        {:else}
+                          {i18n.currentLocale === 'en' ? 'Enhance Voice' : '音声を補正・抜粋'}
+                        {/if}
+                      </button>
+                    </div>
+                    {#if enhanceVoiceError}
+                      <p class="text-xs text-rose-400 px-1">{enhanceVoiceError}</p>
+                    {/if}
+                  </div>
+                {/if}
+              {/if}
+
               <AudioPlayer
                 audioPath={selectedRecord.audio_path}
-                title={`${selectedRecord.sat_name} APT Recorded Audio`}
+                title={selectedRecord.decode_mode === 'VOICE' ? `${selectedRecord.sat_name} (Original Audio)` : `${selectedRecord.sat_name} APT Recorded Audio`}
               />
 
               <div class="bg-slate-950/60 rounded-xl border border-slate-800 p-4 space-y-2 text-xs text-slate-400">
