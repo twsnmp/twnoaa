@@ -17,14 +17,14 @@
 ## ✨ Key Features
 
 - 🛰️ **Automated Orbit Propagation & Pass Prediction** — Built-in pure Go SGP4 engine fetches live TLEs from CelesTrak to calculate precise visible satellite passes and auto-schedule receptions based on observer coordinates.
-- 📻 **Direct RTL-SDR Control & Real-Time DSP** — Direct hardware control via `librtlsdr`, including Bias-Tee power (4.5V for active LNAs), dynamic gain tuning, and live high-speed FFT spectrum & waterfall displays.
+- 📻 **Direct RTL-SDR Control & Real-Time DSP** — Direct hardware control via `librtlsdr`, including Bias-Tee power (4.5V for active LNAs), dynamic gain tuning, automatic open retry with hardware alert notifications, and live high-speed FFT spectrum & waterfall displays.
 - 🧪 **Built-in Simulation Mode** — Full workflow verification (synthetic signal generation, DSP demodulation, APT image synthesis, AI analysis) even without physical SDR hardware connected.
 - 🖼️ **Multi-Protocol Satellite Decoders**
   - **NOAA APT**: FM demodulation, 2400 Hz AM subcarrier sync frame cross-correlation, dual-channel (Visible & Thermal IR) high-resolution image rendering.
   - **METEOR-M2 LRPT**: QPSK demodulation, Costas loop carrier recovery, RRC matched filtering, Viterbi & Reed-Solomon error correction for high-resolution multispectral imagery (with resilient timestamp outlier handling & automatic clock fallback).
-  - **SSTV**: ISS (International Space Station) and amateur radio space image decoding (Martin, Scottie, and other modes).
-- 📡 **ISS APRS Packet Telemetry & Real-Time Monitor** — Dual-branch demodulation of 1200 bps AFSK / AX.25 packets from the International Space Station (ARISS), featuring live callsign tracking, Maidenhead Grid Locator resolution, and one-click Google Maps / aprs.fi integration.
-- 🤖 **AI Meteorological Insights & Cat Animation** — Passes newly decoded satellite images and reception metadata to Multimodal LLMs (Google Gemini, OpenAI, Anthropic, or local Ollama) to produce weather front, cyclone vortex, and cloud pattern analysis, accompanied by a delightful animated cat character during reasoning.
+  - **SSTV**: ISS (International Space Station) and amateur radio space image decoding (Martin, Scottie, and other modes) with NBFM demodulation and no-signal snow-image suppression.
+- 📡 **ISS APRS Packet Telemetry & Real-Time Monitor** — Dual-branch demodulation of 1200 bps AFSK / AX.25 packets with strict header validation from the International Space Station (ARISS), featuring live callsign tracking, Maidenhead Grid Locator resolution, one-click Google Maps / aprs.fi integration, and **AI packet explanation**.
+- 🤖 **Unified AI Analysis & Cat Animation** — Passes decoded satellite images, **ISS FM Voice audio**, and **APRS packet logs** to Multimodal LLMs (**Google Gemini**, **OpenRouter**, **OpenAI / OpenAI-Compatible**, **Anthropic**, or local **Ollama**) to produce meteorological insights, voice transcriptions/summaries, and packet analyses, accompanied by a delightful animated cat character during reasoning.
 - 📼 **Raw I/Q Data Recording & Replay** — Capture live raw RF signals to disk and replay them anytime with different filter parameters or decoder algorithms.
 - 💾 **Local-First Persistent Storage** — Embedded bbolt key-value database securely stores all pass records, decoded images, and AI reports completely on your local machine.
 - 🌐 **Bilingual UI** — Seamless switching between English and Japanese interfaces.
@@ -130,7 +130,7 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 ![Receiver](images/screen_sdr_en.png)
 
 - **Hardware Control Header**:
-  - Displays detected RTL-SDR status (e.g., `RTL-SDR Device #0 (1 found) Direct librtlsdr Hardware Control Active`).
+  - Displays detected RTL-SDR status (e.g., `RTL-SDR Device #0 (1 found) Direct librtlsdr Hardware Control Active`). If the hardware fails to open after automatic retries, a persistent alert banner is displayed at the top of the window rather than silently switching to simulation mode.
   - **Bias-T (4.5V LNA Power)**: Power active LNA amplifiers through the coaxial cable with a single toggle.
   - **Force Sim Mode**: Run internal synthetic signal generation without hardware connected.
   - **Start Stream / Stop Stream**: Toggle live streaming I/Q processing.
@@ -150,8 +150,9 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 - **Maidenhead Grid Locator Parsing & Map Links**:
   - Automatically parses Maidenhead grid locators (e.g. `PM96`) embedded in packet payloads into latitude/longitude coordinates.
   - Includes a direct "Map" button to open the sending station's geographic position on Google Maps or aprs.fi in your browser.
-- **Search Filtering & Clean Interface**:
+- **Search Filtering & AI Packet Explanation**:
   - Incremental text filtering by callsign or content, auto-scroll toggle, and one-click log clearing.
+  - Select any packet and click **"AI Explain Packet"** to generate an AI-powered breakdown of the callsign, digipeater path, position/grid, and telemetry payload directly in the detail pane.
 
 ### 5. Satellite Image Gallery (Image Gallery)
 ![Image Gallery](images/screen_gallery_en.png)
@@ -162,23 +163,26 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
 - **High-Definition Image Viewer**:
   - Displays rendered multispectral and visible/IR satellite images. Clicking the preview launches a center-locked zoom & pan viewer for inspecting cloud vortices, frontal boundaries, and coastlines.
   - Multi-tab visualization modes: "APT Image", "Signal Graph", "Multi-Pass Compare", "APT Audio", and "FFT Spectrum".
-- **FM Voice Audio Playback & Per-Pass APRS Packet Log**:
+- **FM Voice Audio Playback, Enhancement & Per-Pass APRS Packet Log**:
   - Play back demodulated WAV audio for non-image transmissions, such as ISS cross-band FM repeater passes, directly within the UI.
+  - For `VOICE` mode passes, click **"Enhance Voice"** to automatically extract active voice segments and apply a speech clarity filter (`Voice Enhanced / Extracted` alongside `Original Audio`).
   - Inspect the full list of APRS packets received and decoded during each specific satellite pass session.
+
+  ![FM Voice Audio Enhancement](images/screen_gallery_voice_en.png)
 - **Offline Processing & AI Handoff**:
   - Re-demodulate and re-decode historical raw signals offline via "Decode from Raw IQ File" or "Decode from WAV File (Test)".
-  - One-click "Analyze with AI" sends the satellite image and pass telemetry directly to multimodal LLMs.
+  - One-click **"Analyze with AI"** sends the satellite image, FM voice audio, or APRS packet log along with pass telemetry directly to multimodal LLMs.
 
-### 6. AI Meteorological Analysis (AI Analysis)
+### 6. AI Analysis (AI Analysis)
 ![AI Analysis](images/screen_ai_en.png)
 
-- **Multi-LLM Weather Analysis Engine**:
-  - Select any recorded satellite pass from the "Select Pass Record" dropdown and click "Run AI Analysis Now" to submit the decoded imagery and pass telemetry to multimodal models (Google Gemini, OpenAI, Ollama, or Anthropic).
+- **Multi-LLM Analysis Engine**:
+  - Select any recorded satellite pass (image, FM voice audio, or APRS packet log) from the "Select Pass Record" dropdown and click **"Run AI Analysis Now"** to submit the data and pass telemetry to multimodal models (**Google Gemini**, **OpenRouter**, **OpenAI / OpenAI-Compatible**, **Ollama**, or **Anthropic**).
   - An animated detective cat mascot appears in a thinking modal while the AI engine generates insights.
-- **Structured Weather Intelligence Report**:
-  - Automatically compiles a comprehensive meteorological assessment:
+- **Structured Intelligence Report**:
+  - Automatically compiles a comprehensive assessment tailored to the pass type:
     - **Reception Summary**: Target satellite, timestamp, ground station location, pass geometry (max elevation/azimuth), and signal quality diagnosis.
-    - **Channel Analysis**: Visible light reflectivity, cloud top temperatures, synoptic weather fronts, cyclonic vortex rotation, and typhoon structures.
+    - **Image / Voice / APRS Analysis**: Visible/IR cloud top temperatures, synoptic weather fronts, and cyclonic vortices for imagery; speech summaries for FM voice; or station/telemetry analysis for APRS passes.
   - "Copy Report" button copies the formatted markdown report directly to your clipboard with one click.
 
 ### 7. Settings
@@ -196,7 +200,7 @@ twnoaa features a streamlined tabbed layout for tracking, receiving, and analyzi
   - **Auto Record Duration & Gain Settings**: Configure pass duration in seconds, manual gain, or Auto Tuner Gain (AGC).
   - **Save Raw IQ Stream Data (`.iq`) & Storage**: Real-time display of total saved raw signal storage space and file count, with a "Delete All Raw IQ Data" button for easy maintenance.
 - **LLM Provider Settings**:
-  - Configure Google Gemini, OpenAI, Anthropic Claude, or local Ollama with API keys, models, and custom prompts.
+  - Configure **Google Gemini** (API key & model name), **OpenRouter** (API key & free/multi-model name), **OpenAI / OpenAI-Compatible** (API key, optional Base URL & model name for Groq, LM Studio, etc.), **Anthropic Claude**, or local **Ollama**, along with custom prompts.
 - **UI Language**: Instant toggle between English and Japanese via the language icon in the top header.
 
 ---
@@ -225,8 +229,9 @@ When a satellite pass is completed and the image is decoded, the metadata (Satel
 - **Structured Markdown Report**: Clear, professional weather observations suitable for amateur radio satellite trackers.
 
 ### Supported AI Providers
-- **Google Gemini** (`gemini-2.5-flash`, `gemini-1.5-pro`, etc.)
-- **OpenAI** (`gpt-4o`, `gpt-4o-mini`, etc.)
+- **Google Gemini** (Direct REST API: `gemini-2.5-flash`, `gemini-2.5-pro`, etc.)
+- **OpenRouter** (`google/gemma-4-31b-it:free`, `openrouter/free`, etc.)
+- **OpenAI / OpenAI-Compatible** (`gpt-4o`, `gpt-4o-mini`, or custom Base URL for Groq, LM Studio, etc.)
 - **Anthropic Claude** (`claude-3-5-sonnet`, etc.)
 - **Ollama** (Local models: `llava`, `minicpm-v`, etc.)
 
@@ -253,7 +258,7 @@ When a satellite pass is completed and the image is decoded, the metadata (Satel
 
 Visit the [Releases](https://github.com/twsnmp/twnoaa/releases) page to get binaries for your operating system:
 
-- **macOS (Apple Silicon)**: Download `twnoaa-v0.2.0-darwin-arm64.pkg` and run the signed installer (notarized by Apple; bundles `librtlsdr` and `libusb` dynamic libraries so no separate installation is required).
+- **macOS (Apple Silicon)**: Download `twnoaa-v0.3.0-darwin-arm64.pkg` and run the signed installer (notarized by Apple; bundles `librtlsdr` and `libusb` dynamic libraries so no separate installation is required).
 - **Windows (x64)**: Download `twnoaa-windows-amd64.zip`, extract to any directory, and run `twnoaa.exe` (includes required `rtlsdr.dll`).
 - **Linux (x64)**: Download `twnoaa-linux-amd64.tar.gz`, extract and run (requires `librtlsdr0`, `libwebkit2gtk-4.1-0`).
 

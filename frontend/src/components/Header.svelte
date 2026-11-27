@@ -5,7 +5,7 @@
   import { GetVersion } from '../../wailsjs/go/main/App'
 
   let { activeTab = 'tracker', onTabChange = () => {}, isStreaming = false } = $props()
-  let appVersion = $state('v0.2.0')
+  let appVersion = $state('v0.3.0')
 
   onMount(async () => {
     try {

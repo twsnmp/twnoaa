@@ -162,7 +162,7 @@ func resolveAppVersion(version, commit string) string {
 		if out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
 			v = strings.TrimSpace(string(out))
 		} else {
-			v = "v0.2.0"
+			v = "v0.3.0"
 		}
 	}
 
